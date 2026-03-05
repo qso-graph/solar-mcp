@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.qso-graph/solar-mcp -->
 # solar-mcp
 
 MCP server for space weather and HF propagation conditions — live solar flux, Kp index, DSCOVR solar wind, X-ray flux, alerts, 27-day forecast, and band-by-band outlook through any MCP-compatible AI assistant.
