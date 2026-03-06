@@ -138,15 +138,16 @@ class SolarClient:
             kp_data = self._get_json(f"{_SWPC}/products/noaa-planetary-k-index.json") or []
             scales_data = self._get_json(f"{_SWPC}/products/noaa-scales.json") or {}
 
-        # Parse SFI
+        # Parse SFI — NOAA uses capitalized keys: "Flux", "TimeStamp"
         sfi = None
         sfi_time = None
         if isinstance(sfi_data, dict):
+            raw = sfi_data.get("Flux") or sfi_data.get("flux") or "0"
             try:
-                sfi = int(sfi_data.get("flux", "0"))
+                sfi = int(raw)
             except (ValueError, TypeError):
                 pass
-            sfi_time = sfi_data.get("timeStamp")
+            sfi_time = sfi_data.get("TimeStamp") or sfi_data.get("timeStamp")
 
         # Parse latest Kp
         kp = None
@@ -185,8 +186,19 @@ class SolarClient:
         self._cache_set(key, result, _CONDITIONS_TTL)
         return result
 
+    def _get_text(self, url: str) -> str:
+        """HTTP GET, return raw text."""
+        self._rate_limit()
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("User-Agent", f"solar-mcp/{__version__}")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except (urllib.error.URLError, urllib.error.HTTPError):
+            raise RuntimeError("NOAA SWPC request failed")
+
     def forecast(self) -> dict[str, Any]:
-        """3-day SFI/Kp forecast from NOAA 27-day outlook."""
+        """27-day SFI/Kp forecast from NOAA outlook."""
         key = "forecast"
         cached = self._cache_get(key)
         if cached is not None:
@@ -195,14 +207,22 @@ class SolarClient:
         if _is_mock():
             rows = _MOCK_FORECAST
         else:
-            data = self._get_json(f"{_SWPC}/products/27-day-outlook.json") or []
-            # Format: [date, sfi, kp] rows, first row may be header
+            text = self._get_text(f"{_SWPC}/text/27-day-outlook.txt")
             rows = []
-            for row in data:
-                if isinstance(row, list) and len(row) >= 3:
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or line.startswith(("#", ":")):
+                    continue
+                parts = line.split()
+                # Lines look like: "2026 Mar 02     150          10          3"
+                if len(parts) >= 6:
                     try:
-                        int(row[1])  # test if SFI is numeric
-                        rows.append(row)
+                        date_str = f"{parts[0]} {parts[1]} {parts[2]}"
+                        sfi_val = parts[3]
+                        kp_val = parts[5]
+                        int(sfi_val)  # validate numeric
+                        int(kp_val)
+                        rows.append([date_str, sfi_val, kp_val])
                     except (ValueError, TypeError):
                         continue
 
@@ -222,7 +242,7 @@ class SolarClient:
         return result
 
     def alerts(self) -> dict[str, Any]:
-        """Active SWPC alerts and warnings."""
+        """Active SWPC alerts and warnings (last 24 hours)."""
         key = "alerts"
         cached = self._cache_get(key)
         if cached is not None:
@@ -233,13 +253,30 @@ class SolarClient:
         else:
             data = self._get_json(f"{_SWPC}/products/alerts.json") or []
 
+        # Filter to last 24 hours and cap message length
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
         alerts = []
         for item in data:
             if isinstance(item, dict):
+                issue_str = item.get("issue_datetime", "")
+                # Parse "2026-03-06 17:53:00.083" format
+                try:
+                    issue_dt = datetime.strptime(
+                        issue_str[:19], "%Y-%m-%d %H:%M:%S"
+                    ).replace(tzinfo=timezone.utc)
+                    if issue_dt < cutoff:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+                msg = item.get("message", "")
+                if len(msg) > 500:
+                    msg = msg[:500] + "..."
                 alerts.append({
                     "product_id": item.get("product_id", ""),
-                    "issue_time": item.get("issue_datetime", ""),
-                    "message": item.get("message", ""),
+                    "issue_time": issue_str,
+                    "message": msg,
                 })
 
         result = {"total": len(alerts), "alerts": alerts}
@@ -327,15 +364,18 @@ class SolarClient:
         else:
             data = self._get_json(f"{_SWPC}/json/goes/primary/xrays-6-hour.json") or []
 
-        # Latest reading
+        # Latest reading — NOAA now provides raw flux, not pre-classified
         flare_class = "unknown"
         xray_time = None
         flux = None
         if isinstance(data, list) and len(data) > 0:
             latest = data[-1] if isinstance(data[-1], dict) else {}
-            flare_class = latest.get("current_class", "unknown")
             xray_time = latest.get("time_tag")
-            flux = latest.get("current_ratio") or latest.get("current_int_xrlong")
+            flux = latest.get("flux") or latest.get("current_ratio")
+            # Try pre-classified first (legacy), fall back to deriving from flux
+            flare_class = latest.get("current_class", "")
+            if not flare_class and flux is not None:
+                flare_class = self._classify_xray(flux)
 
         result: dict[str, Any] = {
             "flare_class": flare_class,
@@ -380,6 +420,20 @@ class SolarClient:
         result["kp"] = kp
         self._cache_set(key, result, _CONDITIONS_TTL)
         return result
+
+    @staticmethod
+    def _classify_xray(flux: float) -> str:
+        """Derive GOES flare class from X-ray flux (W/m²)."""
+        if flux >= 1e-4:
+            return f"X{flux / 1e-4:.1f}"
+        elif flux >= 1e-5:
+            return f"M{flux / 1e-5:.1f}"
+        elif flux >= 1e-6:
+            return f"C{flux / 1e-6:.1f}"
+        elif flux >= 1e-7:
+            return f"B{flux / 1e-7:.1f}"
+        else:
+            return f"A{flux / 1e-8:.1f}"
 
     @staticmethod
     def _band_outlook(sfi: int, kp: float) -> dict[str, Any]:
