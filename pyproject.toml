@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "MCP server for solar indices and space weather — SFI, SSN, Kp, DSCOVR, alerts"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
-authors = [{name = "Greg Beam, KI7MT"}]
+authors = [{name = "Greg Beam, KI7MT", email = "ki7mt@yahoo.com"}]
 requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=3.0",
@@ -27,7 +27,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://qso-graph.io/"
+Homepage = "https://qso-graph.io"
+Documentation = "https://qso-graph.io"
 Repository = "https://github.com/qso-graph/solar-mcp"
 Issues = "https://github.com/qso-graph/solar-mcp/issues"
 
