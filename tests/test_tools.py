@@ -298,3 +298,48 @@ class TestEdgeCases:
         # Quiet sun
         result = SolarClient._classify_xray(1e-9)
         assert result.startswith("A")
+
+
+# ---------------------------------------------------------------------------
+# SOLAR-L2-041..045: get_version_info — fleet identity attestation
+# ---------------------------------------------------------------------------
+
+
+class TestGetVersionInfo:
+    """Tracks IONIS-AI/ionis-devel#49 — fleet get_version_info convention."""
+
+    def test_returns_service_name(self):
+        """SOLAR-L2-041: payload includes service_name = 'solar-mcp'."""
+        from solar_mcp.server import _version_info_payload
+
+        assert _version_info_payload()["service_name"] == "solar-mcp"
+
+    def test_returns_service_version(self):
+        """SOLAR-L2-042: service_version matches package __version__."""
+        from solar_mcp import __version__
+        from solar_mcp.server import _version_info_payload
+
+        assert _version_info_payload()["service_version"] == __version__
+
+    def test_returns_spec_version(self):
+        """SOLAR-L2-043: spec_version pins the NOAA SWPC endpoint set."""
+        from solar_mcp.server import _version_info_payload
+
+        assert _version_info_payload()["spec_version"] == "noaa-swpc-v1"
+
+    def test_payload_keys_are_required_set(self):
+        """SOLAR-L2-044: payload has exactly the required keys (no extras yet)."""
+        from solar_mcp.server import _version_info_payload
+
+        result = _version_info_payload()
+        required = {"service_name", "service_version", "spec_version"}
+        assert required.issubset(set(result.keys()))
+
+    def test_all_values_are_strings(self):
+        """SOLAR-L2-045: all returned values are strings (JSON-safe envelope)."""
+        from solar_mcp.server import _version_info_payload
+
+        result = _version_info_payload()
+        for k in ("service_name", "service_version", "spec_version"):
+            assert isinstance(result[k], str), f"{k} should be str, got {type(result[k])}"
+            assert result[k], f"{k} should be non-empty"
