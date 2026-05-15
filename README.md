@@ -21,6 +21,7 @@ pip install solar-mcp
 | `solar_wind` | Real-time DSCOVR L1 solar wind (Bz, speed, density) |
 | `solar_xray` | GOES X-ray flux and solar flare classification |
 | `solar_band_outlook` | HF band-by-band propagation assessment (160m-6m) |
+| `get_version_info` | Service version + upstream spec version (fleet identity attestation) |
 
 ## Quick Start
 
