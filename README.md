@@ -1,9 +1,14 @@
 <!-- mcp-name: io.github.qso-graph/solar-mcp -->
 # solar-mcp
 
+[![PyPI](https://img.shields.io/pypi/v/solar-mcp?label=PyPI&color=blue)](https://pypi.org/project/solar-mcp/)
+[![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dsolar-mcp&query=%24.servers%5B0%5D.server.version&label=MCP%20Registry&color=blue)](https://registry.modelcontextprotocol.io/v0/servers?search=solar-mcp)
+
 MCP server for space weather and HF propagation conditions — live solar flux, Kp index, DSCOVR solar wind, X-ray flux, alerts, 27-day forecast, and band-by-band outlook through any MCP-compatible AI assistant.
 
 Part of the [qso-graph](https://qso-graph.io/) project. **No authentication required** — all data from [NOAA SWPC](https://www.swpc.noaa.gov/) public endpoints.
+
+> **Version drift?** If the PyPI and MCP Registry badges show different versions, the Registry is catching up to the latest PyPI release on this server's next tag. Forward-only sync — we don't tag content-free releases just to sync. See [qso-graph/.github TEMPLATES.md](https://github.com/qso-graph/.github/blob/main/TEMPLATES.md) for the sync mechanism.
 
 ## Install
 

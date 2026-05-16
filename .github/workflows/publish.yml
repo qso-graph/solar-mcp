@@ -68,3 +68,42 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ---------------------------------------------------------------------------
+  # Registry-publish — pushes server.json to the Official MCP Registry after
+  # PyPI publish succeeds, so discovery surfaces stay in sync with PyPI.
+  # Canonical template: https://github.com/qso-graph/.github/blob/main/TEMPLATES.md
+  # ---------------------------------------------------------------------------
+  registry-publish:
+    name: Publish to MCP Registry
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # GitHub OIDC auth to the Registry
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install jq (server.json bump)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher --help > /dev/null
+
+      - name: Bump server.json to tag version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting server.json to ${TAG_VERSION}"
+          jq --arg v "$TAG_VERSION" \
+             '.version = $v | .packages[0].version = $v' \
+             server.json > /tmp/server.json
+          mv /tmp/server.json server.json
+          cat server.json
+
+      - name: Authenticate to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
