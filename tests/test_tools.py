@@ -14,7 +14,7 @@ import pytest
 # Enable mock mode before importing anything
 os.environ["SOLAR_MCP_MOCK"] = "1"
 
-from solar_mcp.client import SolarClient
+from solar_mcp.client import SolarClient, _to_float
 
 
 # ---------------------------------------------------------------------------
@@ -343,3 +343,150 @@ class TestGetVersionInfo:
         for k in ("service_name", "service_version", "spec_version"):
             assert isinstance(result[k], str), f"{k} should be str, got {type(result[k])}"
             assert result[k], f"{k} should be non-empty"
+
+
+# ---------------------------------------------------------------------------
+# SOLAR-L2-046..052: NOAA SWPC 2026 format changes
+# ---------------------------------------------------------------------------
+
+
+class TestNoaa2026Formats:
+    """Covers NOAA SWPC format changes observed Aug 2026:
+
+    - ``10cm-flux.json`` now returns ``[{"flux": ..., "time_tag": ...}]``
+      (was: single dict with ``Flux``/``TimeStamp``)
+    - ``noaa-planetary-k-index.json`` now returns dict rows
+      ``{"time_tag": ..., "Kp": ...}`` (was: list rows)
+    - solar wind moved to ``json/rtsw/rtsw_{mag,wind}_1m.json`` with
+      ``bz_gsm``/``bt`` and ``proton_density``/``proton_speed`` keys
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_mock(self, monkeypatch):
+        """These tests feed _get_json directly — disable mock mode."""
+        monkeypatch.setenv("SOLAR_MCP_MOCK", "0")
+
+    @staticmethod
+    def _fake_get_json(payloads: dict):
+        def _get(url: str):
+            for frag, data in payloads.items():
+                if frag in url:
+                    return data
+            return None
+
+        return _get
+
+    def test_to_float_missing_flags(self):
+        """SOLAR-L2-046: _to_float treats -9999/None/garbage as None."""
+        assert _to_float(-9999) is None
+        assert _to_float(None) is None
+        assert _to_float("abc") is None
+        assert _to_float("") is None
+
+    def test_to_float_values(self):
+        """SOLAR-L2-047: _to_float parses numeric strings and keeps 0.0."""
+        assert _to_float("3.5") == 3.5
+        assert _to_float(2) == 2.0
+        assert _to_float(0.0) == 0.0
+
+    def test_conditions_new_list_format(self, client, monkeypatch):
+        """SOLAR-L2-048: conditions() parses 2026 list/dict JSON shapes."""
+        client._get_json = self._fake_get_json({
+            "10cm-flux.json": [{"flux": 122, "time_tag": "2026-08-27T20:00:00"}],
+            "noaa-planetary-k-index.json": [
+                {"time_tag": "2026-08-28T06:00:00", "Kp": 1.00},
+                {"time_tag": "2026-08-28T09:00:00", "Kp": 1.67},
+            ],
+            "noaa-scales.json": {
+                "0": {"R": {"Scale": "R0", "Text": "none"},
+                      "S": {"Scale": "S0", "Text": "none"},
+                      "G": {"Scale": "G0", "Text": "none"}},
+            },
+        })
+        result = client.conditions()
+        assert result["sfi"] == 122
+        assert result["sfi_timestamp"] == "2026-08-27T20:00:00"
+        assert result["kp"] == 1.67
+        assert result["kp_timestamp"] == "2026-08-28T09:00:00"
+        assert result["noaa_r_scale"] == "R0"
+        assert "band_outlook" in result
+
+    def test_solar_wind_new_rtsw_format(self, client, monkeypatch):
+        """SOLAR-L2-049: solar_wind() parses RTSW dict format."""
+        client._get_json = self._fake_get_json({
+            "rtsw_mag_1m.json": [
+                {"time_tag": "2026-08-27T14:00:00", "bz_gsm": -1.0, "bt": 3.0},
+                {"time_tag": "2026-08-27T14:01:00", "bz_gsm": -3.2, "bt": 4.1},
+            ],
+            "rtsw_wind_1m.json": [
+                {"time_tag": "2026-08-27T14:01:00",
+                 "proton_density": 4.0, "proton_speed": 400.0},
+                {"time_tag": "2026-08-27T14:02:00",
+                 "proton_density": 5.2, "proton_speed": 425.0},
+            ],
+        })
+        result = client.solar_wind()
+        assert result["bz_gsm_nt"] == -3.2
+        assert result["bt_nt"] == 4.1
+        assert result["speed_km_s"] == 425.0
+        assert result["density_p_cm3"] == 5.2
+        assert result["plasma_timestamp"] == "2026-08-27T14:02:00"
+        assert "assessment" in result
+
+    def test_solar_wind_missing_flags(self, client, monkeypatch):
+        """SOLAR-L2-050: -9999 sentinels become None, not bogus values."""
+        client._get_json = self._fake_get_json({
+            "rtsw_mag_1m.json": [
+                {"time_tag": "2026-08-27T14:00:00", "bz_gsm": -1.0, "bt": 3.0},
+                {"time_tag": "2026-08-27T14:01:00", "bz_gsm": -9999, "bt": -9999},
+            ],
+            "rtsw_wind_1m.json": [
+                {"time_tag": "2026-08-27T14:01:00",
+                 "proton_density": 4.0, "proton_speed": 400.0},
+                {"time_tag": "2026-08-27T14:02:00",
+                 "proton_density": -9999, "proton_speed": -9999},
+            ],
+        })
+        result = client.solar_wind()
+        assert result["bz_gsm_nt"] is None
+        assert result["bt_nt"] is None
+        assert result["speed_km_s"] is None
+        assert result["density_p_cm3"] is None
+        assert "assessment" not in result
+
+    def test_solar_wind_bz_gse_fallback(self, client, monkeypatch):
+        """SOLAR-L2-051: bz falls back to bz_gse when bz_gsm is missing data."""
+        client._get_json = self._fake_get_json({
+            "rtsw_mag_1m.json": [
+                {"time_tag": "2026-08-27T14:00:00", "bz_gsm": -1.0, "bt": 3.0},
+                {"time_tag": "2026-08-27T14:01:00", "bz_gsm": -9999,
+                 "bz_gse": -2.5, "bt": 4.1},
+            ],
+            "rtsw_wind_1m.json": [
+                {"time_tag": "2026-08-27T14:01:00",
+                 "proton_density": 4.0, "proton_speed": 400.0},
+                {"time_tag": "2026-08-27T14:02:00",
+                 "proton_density": 5.2, "proton_speed": 425.0},
+            ],
+        })
+        result = client.solar_wind()
+        assert result["bz_gsm_nt"] == -2.5
+
+    def test_conditions_legacy_format_still_works(self, client, monkeypatch):
+        """SOLAR-L2-052: old dict/list shapes keep working (backward compat)."""
+        client._get_json = self._fake_get_json({
+            "10cm-flux.json": {"Flux": "175", "TimeStamp": "2026-03-04 20:00:00"},
+            "noaa-planetary-k-index.json": [
+                ["time_tag", "Kp", "Kp_fraction", "a_running", "station_count"],
+                ["2026-03-04 21:00:00", "3", "2.67", "15", "8"],
+            ],
+            "noaa-scales.json": {
+                "0": {"R": {"Scale": "R0", "Text": "none"},
+                      "S": {"Scale": "S0", "Text": "none"},
+                      "G": {"Scale": "G0", "Text": "none"}},
+            },
+        })
+        result = client.conditions()
+        assert result["sfi"] == 175
+        assert result["kp"] == 3.0
+

@@ -28,6 +28,15 @@ def _is_mock() -> bool:
     return os.getenv("SOLAR_MCP_MOCK") == "1"
 
 
+def _to_float(value: Any) -> float | None:
+    """Convert to float, treating NOAA missing-data flags (-9999) as None."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if f == -9999 else f
+
+
 # ---------------------------------------------------------------------------
 # Mock data
 # ---------------------------------------------------------------------------
@@ -116,6 +125,8 @@ class SolarClient:
             body = resp.read().decode("utf-8", errors="replace")
         if not body or body.strip() == "":
             return None
+        # NOAA's file servers occasionally append trailing NUL bytes
+        body = body.strip("\x00").strip()
         return json.loads(body)
 
     # ------------------------------------------------------------------
@@ -138,27 +149,33 @@ class SolarClient:
             kp_data = self._get_json(f"{_SWPC}/products/noaa-planetary-k-index.json") or []
             scales_data = self._get_json(f"{_SWPC}/products/noaa-scales.json") or {}
 
-        # Parse SFI — NOAA uses capitalized keys: "Flux", "TimeStamp"
+        # Parse SFI — NOAA returns [{"flux": 122, "time_tag": "..."}]
         sfi = None
         sfi_time = None
+        if isinstance(sfi_data, list) and sfi_data:
+            sfi_data = sfi_data[-1]
         if isinstance(sfi_data, dict):
             raw = sfi_data.get("Flux") or sfi_data.get("flux") or "0"
             try:
-                sfi = int(raw)
+                sfi = int(float(raw))
             except (ValueError, TypeError):
                 pass
-            sfi_time = sfi_data.get("TimeStamp") or sfi_data.get("timeStamp")
+            sfi_time = (
+                sfi_data.get("TimeStamp")
+                or sfi_data.get("timeStamp")
+                or sfi_data.get("time_tag")
+            )
 
-        # Parse latest Kp
+        # Parse latest Kp — NOAA returns dict rows {"time_tag":..., "Kp":...}
         kp = None
         kp_time = None
         if isinstance(kp_data, list) and len(kp_data) > 1:
             latest = kp_data[-1]
-            if isinstance(latest, list) and len(latest) >= 2:
-                try:
-                    kp = float(latest[1])
-                except (ValueError, TypeError):
-                    pass
+            if isinstance(latest, dict):
+                kp = _to_float(latest.get("Kp") or latest.get("kp"))
+                kp_time = latest.get("time_tag") or latest.get("timeStamp")
+            elif isinstance(latest, list) and len(latest) >= 2:
+                kp = _to_float(latest[1])
                 kp_time = latest[0]
 
         # Parse NOAA scales (current = "0", 24hr max = "-1")
@@ -294,40 +311,38 @@ class SolarClient:
             mag_data = _MOCK_WIND_MAG
             plasma_data = _MOCK_WIND_PLASMA
         else:
-            mag_data = self._get_json(f"{_SWPC}/products/solar-wind/mag-5-minute.json") or []
-            plasma_data = self._get_json(f"{_SWPC}/products/solar-wind/plasma-5-minute.json") or []
+            mag_data = self._get_json(f"{_SWPC}/json/rtsw/rtsw_mag_1m.json") or []
+            plasma_data = self._get_json(f"{_SWPC}/json/rtsw/rtsw_wind_1m.json") or []
 
         # Latest magnetic field
         bz = bt = None
         mag_time = None
         if isinstance(mag_data, list) and len(mag_data) > 1:
             latest = mag_data[-1]
-            if isinstance(latest, list) and len(latest) >= 4:
+            if isinstance(latest, dict):
+                mag_time = latest.get("time_tag")
+                bz = _to_float(latest.get("bz_gsm"))
+                if bz is None:
+                    bz = _to_float(latest.get("bz_gse"))
+                bt = _to_float(latest.get("bt"))
+            elif isinstance(latest, list) and len(latest) >= 4:
                 mag_time = latest[0]
-                try:
-                    bz = float(latest[3])
-                except (ValueError, TypeError):
-                    pass
-                try:
-                    bt = float(latest[4]) if len(latest) > 4 else None
-                except (ValueError, TypeError):
-                    pass
+                bz = _to_float(latest[3])
+                bt = _to_float(latest[4]) if len(latest) > 4 else None
 
         # Latest plasma
         speed = density = None
         plasma_time = None
         if isinstance(plasma_data, list) and len(plasma_data) > 1:
             latest = plasma_data[-1]
-            if isinstance(latest, list) and len(latest) >= 3:
+            if isinstance(latest, dict):
+                plasma_time = latest.get("time_tag")
+                density = _to_float(latest.get("proton_density") or latest.get("density"))
+                speed = _to_float(latest.get("proton_speed") or latest.get("speed"))
+            elif isinstance(latest, list) and len(latest) >= 3:
                 plasma_time = latest[0]
-                try:
-                    density = float(latest[1])
-                except (ValueError, TypeError):
-                    pass
-                try:
-                    speed = float(latest[2])
-                except (ValueError, TypeError):
-                    pass
+                density = _to_float(latest[1])
+                speed = _to_float(latest[2])
 
         result: dict[str, Any] = {
             "bz_gsm_nt": bz,

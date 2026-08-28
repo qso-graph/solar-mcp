@@ -30,6 +30,26 @@ solar-mcp is the **pilot repo** for this rollout (per Patton's
 demonstrates the workflow end-to-end, the same pattern fans out to
 the other 12 qso-graph + IONIS-AI MCP repos.
 
+### Fixed (NOAA SWPC 2026 format changes)
+
+- **SFI parsing** — `products/summary/10cm-flux.json` now returns a list
+  of `{"flux", "time_tag"}` dicts (was: single dict with
+  `Flux`/`TimeStamp`). `conditions()` now handles both shapes.
+- **Kp parsing** — `products/noaa-planetary-k-index.json` now returns dict
+  rows (`{"time_tag", "Kp", ...}`) instead of list rows. `conditions()`
+  now handles both shapes.
+- **Solar wind endpoints** — `products/solar-wind/{mag,plasma}-5-minute.json`
+  are gone (HTTP 404). `solar_wind()` now uses
+  `json/rtsw/rtsw_mag_1m.json` and `json/rtsw/rtsw_wind_1m.json`, parsing
+  `bz_gsm`/`bt` and `proton_density`/`proton_speed` keys (source is DSCOVR
+  or ACE).
+- **Missing-data flags** — new `_to_float()` helper treats NOAA's `-9999`
+  sentinel (and JSON `null`) as `None` instead of leaking bogus values
+  into `solar_wind()`/`conditions()`.
+- **Trailing NUL bytes** — NOAA's file servers occasionally append `\x00`
+  to JSON responses (observed on `json/goes/primary/xrays-6-hour.json`);
+  `_get_json()` now strips them before parsing.
+
 ## [0.2.1] — 2026-05-15
 
 ### Added
