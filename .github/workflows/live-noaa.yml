@@ -1,0 +1,63 @@
+name: Live NOAA check
+
+# NOAA SWPC has changed its JSON formats without notice (twice in 2026), and
+# the only symptom was blank results. Weekly, run the live tests against the
+# real endpoints. A failure opens (or updates) one "NOAA SWPC check failing"
+# issue; it closes itself when the tests pass again.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"  # Mondays 13:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  live:
+    name: Live tests against NOAA SWPC
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e . pytest pytest-asyncio
+
+      - name: Live tests
+        id: live
+        run: |
+          set +e
+          python -m pytest tests/test_live.py --live -v 2>&1 | tee live.log
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the issue
+        if: steps.live.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="NOAA SWPC check failing"
+          RUN="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          BODY="$(printf 'The weekly live tests against NOAA SWPC failed (%s). NOAA may have changed a feed.\n\n```\n%s\n```\n' "$RUN" "$(grep -E 'FAILED|Error|error' live.log | tail -30)")"
+          NUM="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title -q ".[] | select(.title == \"$TITLE\") | .number" | head -1)"
+          if [ -n "$NUM" ]; then
+            gh issue comment "$NUM" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi
+          exit 1
+
+      - name: Close the issue when the tests pass
+        if: steps.live.outputs.status == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="NOAA SWPC check failing"
+          NUM="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title -q ".[] | select(.title == \"$TITLE\") | .number" | head -1)"
+          if [ -n "$NUM" ]; then
+            gh issue close "$NUM" --comment "The live NOAA tests pass again ($(date -u +%F))."
+          fi
