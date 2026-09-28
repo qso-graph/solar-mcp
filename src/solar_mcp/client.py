@@ -32,10 +32,10 @@ def _is_mock() -> bool:
 # Mock data
 # ---------------------------------------------------------------------------
 
-_MOCK_SFI = {"timeStamp": "2026-03-04 20:00:00.000", "flux": "175", "area": ""}
+_MOCK_SFI = [{"flux": 175, "time_tag": "2026-03-04T20:00:00.000"}]
 _MOCK_KP = [
-    ["time_tag", "Kp", "Kp_fraction", "a_running", "station_count"],
-    ["2026-03-04 21:00:00.000", "3", "2.67", "15", "8"],
+    {"time_tag": "2026-03-04T18:00:00.000", "Kp": 2.33, "a_running": 9, "station_count": 8},
+    {"time_tag": "2026-03-04T21:00:00.000", "Kp": 3.0, "a_running": 15, "station_count": 8},
 ]
 _MOCK_SCALES = {
     "0": {
@@ -138,23 +138,42 @@ class SolarClient:
             kp_data = self._get_json(f"{_SWPC}/products/noaa-planetary-k-index.json") or []
             scales_data = self._get_json(f"{_SWPC}/products/noaa-scales.json") or {}
 
-        # Parse SFI — NOAA uses capitalized keys: "Flux", "TimeStamp"
+        # Parse SFI (supports current list-of-dicts from /summary/10cm-flux.json
+        # and legacy top-level dict format).
         sfi = None
         sfi_time = None
         if isinstance(sfi_data, dict):
+            # legacy dict format
             raw = sfi_data.get("Flux") or sfi_data.get("flux") or "0"
             try:
                 sfi = int(raw)
             except (ValueError, TypeError):
                 pass
             sfi_time = sfi_data.get("TimeStamp") or sfi_data.get("timeStamp")
+        elif isinstance(sfi_data, list) and sfi_data:
+            # current: list of recent dicts (take most recent)
+            latest = sfi_data[-1] if len(sfi_data) > 1 else sfi_data[0]
+            if isinstance(latest, dict):
+                raw = latest.get("flux") or latest.get("Flux") or "0"
+                try:
+                    sfi = int(raw)
+                except (ValueError, TypeError):
+                    pass
+                sfi_time = latest.get("time_tag") or latest.get("TimeStamp") or latest.get("timeStamp")
 
-        # Parse latest Kp
+        # Parse latest Kp (supports current list-of-dicts and legacy list-of-lists).
         kp = None
         kp_time = None
-        if isinstance(kp_data, list) and len(kp_data) > 1:
+        if isinstance(kp_data, list) and kp_data:
             latest = kp_data[-1]
-            if isinstance(latest, list) and len(latest) >= 2:
+            if isinstance(latest, dict):
+                kp_time = latest.get("time_tag")
+                try:
+                    kp = float(latest.get("Kp") or latest.get("kp") or 0)
+                except (ValueError, TypeError):
+                    pass
+            elif isinstance(latest, list) and len(latest) >= 2:
+                # legacy list-of-lists format
                 try:
                     kp = float(latest[1])
                 except (ValueError, TypeError):
@@ -168,6 +187,13 @@ class SolarClient:
             r_scale = current.get("R", {}).get("Scale", "unknown")
             s_scale = current.get("S", {}).get("Scale", "unknown")
             g_scale = current.get("G", {}).get("Scale", "unknown")
+            # Normalize current "none" (0) to R0/S0/G0 for consistency with docs/tests
+            if r_scale == "0":
+                r_scale = "R0"
+            if s_scale == "0":
+                s_scale = "S0"
+            if g_scale == "0":
+                g_scale = "G0"
 
         result: dict[str, Any] = {
             "sfi": sfi,
