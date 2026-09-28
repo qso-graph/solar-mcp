@@ -28,14 +28,23 @@ def _is_mock() -> bool:
     return os.getenv("SOLAR_MCP_MOCK") == "1"
 
 
+def _to_float(value: Any) -> float | None:
+    """Convert to float, treating NOAA missing-data flags (-9999) as None."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if f == -9999 else f
+
+
 # ---------------------------------------------------------------------------
 # Mock data
 # ---------------------------------------------------------------------------
 
-_MOCK_SFI = [{"flux": 175, "time_tag": "2026-03-04T20:00:00.000"}]
+_MOCK_SFI = {"timeStamp": "2026-03-04 20:00:00.000", "flux": "175", "area": ""}
 _MOCK_KP = [
-    {"time_tag": "2026-03-04T18:00:00.000", "Kp": 2.33, "a_running": 9, "station_count": 8},
-    {"time_tag": "2026-03-04T21:00:00.000", "Kp": 3.0, "a_running": 15, "station_count": 8},
+    ["time_tag", "Kp", "Kp_fraction", "a_running", "station_count"],
+    ["2026-03-04 21:00:00.000", "3", "2.67", "15", "8"],
 ]
 _MOCK_SCALES = {
     "0": {
@@ -73,6 +82,22 @@ _MOCK_FORECAST = [
     ["2026 Mar 06", "170", "2"],
     ["2026 Mar 07", "168", "2"],
 ]
+
+
+
+def _latest_rtsw(rows: list) -> Any:
+    """The newest reading from NOAA's real-time solar wind feed.
+
+    The rtsw files hold a day of 1-minute rows, newest first, with one row per
+    spacecraft per minute; ``active`` marks the one NOAA is using. Pick the
+    newest active row by time, whatever order the file is in. Legacy
+    list-of-lists data (header row first, oldest to newest) keeps its last row.
+    """
+    dicts = [r for r in rows if isinstance(r, dict) and r.get("time_tag")]
+    if not dicts:
+        return rows[-1] if rows else None
+    active = [r for r in dicts if r.get("active") is True] or dicts
+    return max(active, key=lambda r: r["time_tag"])
 
 
 class SolarClient:
@@ -116,6 +141,8 @@ class SolarClient:
             body = resp.read().decode("utf-8", errors="replace")
         if not body or body.strip() == "":
             return None
+        # NOAA's file servers occasionally append trailing NUL bytes
+        body = body.strip("\x00").strip()
         return json.loads(body)
 
     # ------------------------------------------------------------------
@@ -138,46 +165,33 @@ class SolarClient:
             kp_data = self._get_json(f"{_SWPC}/products/noaa-planetary-k-index.json") or []
             scales_data = self._get_json(f"{_SWPC}/products/noaa-scales.json") or {}
 
-        # Parse SFI (supports current list-of-dicts from /summary/10cm-flux.json
-        # and legacy top-level dict format).
+        # Parse SFI — NOAA returns [{"flux": 122, "time_tag": "..."}]
         sfi = None
         sfi_time = None
+        if isinstance(sfi_data, list) and sfi_data:
+            sfi_data = sfi_data[-1]
         if isinstance(sfi_data, dict):
-            # legacy dict format
             raw = sfi_data.get("Flux") or sfi_data.get("flux") or "0"
             try:
-                sfi = int(raw)
+                sfi = int(float(raw))
             except (ValueError, TypeError):
                 pass
-            sfi_time = sfi_data.get("TimeStamp") or sfi_data.get("timeStamp")
-        elif isinstance(sfi_data, list) and sfi_data:
-            # current: list of recent dicts (take most recent)
-            latest = sfi_data[-1] if len(sfi_data) > 1 else sfi_data[0]
-            if isinstance(latest, dict):
-                raw = latest.get("flux") or latest.get("Flux") or "0"
-                try:
-                    sfi = int(raw)
-                except (ValueError, TypeError):
-                    pass
-                sfi_time = latest.get("time_tag") or latest.get("TimeStamp") or latest.get("timeStamp")
+            sfi_time = (
+                sfi_data.get("TimeStamp")
+                or sfi_data.get("timeStamp")
+                or sfi_data.get("time_tag")
+            )
 
-        # Parse latest Kp (supports current list-of-dicts and legacy list-of-lists).
+        # Parse latest Kp — NOAA returns dict rows {"time_tag":..., "Kp":...}
         kp = None
         kp_time = None
-        if isinstance(kp_data, list) and kp_data:
+        if isinstance(kp_data, list) and len(kp_data) > 1:
             latest = kp_data[-1]
             if isinstance(latest, dict):
-                kp_time = latest.get("time_tag")
-                try:
-                    kp = float(latest.get("Kp") or latest.get("kp") or 0)
-                except (ValueError, TypeError):
-                    pass
+                kp = _to_float(latest.get("Kp") or latest.get("kp"))
+                kp_time = latest.get("time_tag") or latest.get("timeStamp")
             elif isinstance(latest, list) and len(latest) >= 2:
-                # legacy list-of-lists format
-                try:
-                    kp = float(latest[1])
-                except (ValueError, TypeError):
-                    pass
+                kp = _to_float(latest[1])
                 kp_time = latest[0]
 
         # Parse NOAA scales (current = "0", 24hr max = "-1")
@@ -187,7 +201,7 @@ class SolarClient:
             r_scale = current.get("R", {}).get("Scale", "unknown")
             s_scale = current.get("S", {}).get("Scale", "unknown")
             g_scale = current.get("G", {}).get("Scale", "unknown")
-            # Normalize current "none" (0) to R0/S0/G0 for consistency with docs/tests
+            # NOAA reports no storm as "0"; show it as R0/S0/G0 like the other levels.
             if r_scale == "0":
                 r_scale = "R0"
             if s_scale == "0":
@@ -320,40 +334,38 @@ class SolarClient:
             mag_data = _MOCK_WIND_MAG
             plasma_data = _MOCK_WIND_PLASMA
         else:
-            mag_data = self._get_json(f"{_SWPC}/products/solar-wind/mag-5-minute.json") or []
-            plasma_data = self._get_json(f"{_SWPC}/products/solar-wind/plasma-5-minute.json") or []
+            mag_data = self._get_json(f"{_SWPC}/json/rtsw/rtsw_mag_1m.json") or []
+            plasma_data = self._get_json(f"{_SWPC}/json/rtsw/rtsw_wind_1m.json") or []
 
         # Latest magnetic field
         bz = bt = None
         mag_time = None
         if isinstance(mag_data, list) and len(mag_data) > 1:
-            latest = mag_data[-1]
-            if isinstance(latest, list) and len(latest) >= 4:
+            latest = _latest_rtsw(mag_data)
+            if isinstance(latest, dict):
+                mag_time = latest.get("time_tag")
+                bz = _to_float(latest.get("bz_gsm"))
+                if bz is None:
+                    bz = _to_float(latest.get("bz_gse"))
+                bt = _to_float(latest.get("bt"))
+            elif isinstance(latest, list) and len(latest) >= 4:
                 mag_time = latest[0]
-                try:
-                    bz = float(latest[3])
-                except (ValueError, TypeError):
-                    pass
-                try:
-                    bt = float(latest[4]) if len(latest) > 4 else None
-                except (ValueError, TypeError):
-                    pass
+                bz = _to_float(latest[3])
+                bt = _to_float(latest[4]) if len(latest) > 4 else None
 
         # Latest plasma
         speed = density = None
         plasma_time = None
         if isinstance(plasma_data, list) and len(plasma_data) > 1:
-            latest = plasma_data[-1]
-            if isinstance(latest, list) and len(latest) >= 3:
+            latest = _latest_rtsw(plasma_data)
+            if isinstance(latest, dict):
+                plasma_time = latest.get("time_tag")
+                density = _to_float(latest.get("proton_density") or latest.get("density"))
+                speed = _to_float(latest.get("proton_speed") or latest.get("speed"))
+            elif isinstance(latest, list) and len(latest) >= 3:
                 plasma_time = latest[0]
-                try:
-                    density = float(latest[1])
-                except (ValueError, TypeError):
-                    pass
-                try:
-                    speed = float(latest[2])
-                except (ValueError, TypeError):
-                    pass
+                density = _to_float(latest[1])
+                speed = _to_float(latest[2])
 
         result: dict[str, Any] = {
             "bz_gsm_nt": bz,

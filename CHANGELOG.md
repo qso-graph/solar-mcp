@@ -5,6 +5,29 @@ All notable changes to `solar-mcp` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-09-28
+
+### Fixed (NOAA SWPC 2026 format changes)
+
+Contributed by [@AnsgarSchmidt](https://github.com/AnsgarSchmidt) ([#5](https://github.com/qso-graph/solar-mcp/pull/5)).
+
+- **Solar wind endpoints** — `products/solar-wind/{mag,plasma}-5-minute.json`
+  are gone (HTTP 404). `solar_wind()` now uses
+  `json/rtsw/rtsw_mag_1m.json` and `json/rtsw/rtsw_wind_1m.json`, parsing
+  `bz_gsm`/`bt` and `proton_density`/`proton_speed` keys (source is DSCOVR
+  or ACE).
+- **Missing-data flags** — new `_to_float()` helper treats NOAA's `-9999`
+  sentinel (and JSON `null`) as `None` instead of leaking bogus values
+  into `solar_wind()`/`conditions()`.
+- **Trailing NUL bytes** — NOAA's file servers occasionally append `\x00`
+  to JSON responses (observed on `json/goes/primary/xrays-6-hour.json`);
+  `_get_json()` now strips them before parsing.
+- **SFI and Kp** — the same NOAA shapes as 0.2.3, parsed through the new `_to_float()`,
+  with the old shapes still accepted.
+- **Newest solar wind reading** — the rtsw files are newest first, with one row per spacecraft
+  per minute; `solar_wind()` takes the newest row from the active spacecraft (it was reading
+  the oldest, a day old).
+
 ## [0.2.3] — 2026-09-28
 
 ### Fixed
