@@ -8,8 +8,6 @@ MCP server for space weather and HF propagation conditions — live solar flux, 
 
 Part of the [qso-graph](https://qso-graph.io/) project. **No authentication required** — all data from [NOAA SWPC](https://www.swpc.noaa.gov/) public endpoints.
 
-> **Version drift?** If the PyPI and MCP Registry badges show different versions, the Registry is catching up to the latest PyPI release on this server's next tag. Forward-only sync — we don't tag content-free releases just to sync. See [qso-graph/.github TEMPLATES.md](https://github.com/qso-graph/.github/blob/main/TEMPLATES.md) for the sync mechanism.
-
 ## Install
 
 ```bash
