@@ -85,19 +85,48 @@ _MOCK_FORECAST = [
 
 
 
-def _latest_rtsw(rows: list) -> Any:
+
+def _check_parsed(result: dict[str, Any], feeds: list[tuple[str, str, list[str]]]) -> None:
+    """Say so when NOAA's data couldn't be read, rather than returning nulls.
+
+    ``feeds`` is (label, NOAA path, result fields) per feed. If every feed came
+    back empty, raise: the tool then returns an error naming the feeds. If
+    only some did, add a ``warnings`` list and keep the values that worked.
+    NOAA has changed these formats without notice before, and the only symptom
+    was nulls.
+    """
+    empty = [f"{label} ({path})" for label, path, fields in feeds
+             if all(result.get(f) is None for f in fields)]
+    if empty and len(empty) == len(feeds):
+        raise RuntimeError(
+            "NOAA SWPC returned no usable data from " + ", ".join(empty)
+            + "; its format may have changed"
+        )
+    if empty:
+        result["warnings"] = [f"{e}: no usable value; NOAA's format may have changed" for e in empty]
+
+
+def _latest_rtsw(rows: list, fields: tuple[str, ...] = ()) -> Any:
     """The newest reading from NOAA's real-time solar wind feed.
 
     The rtsw files hold a day of 1-minute rows, newest first, with one row per
-    spacecraft per minute; ``active`` marks the one NOAA is using. Pick the
-    newest active row by time, whatever order the file is in. Legacy
-    list-of-lists data (header row first, oldest to newest) keeps its last row.
+    spacecraft per minute; ``active`` marks the one NOAA is using. Take the
+    newest active row, whatever order the file is in, skipping minutes where
+    every one of ``fields`` is missing data (-9999 or null): a gap in the
+    newest minute shouldn't hide the reading from the minute before. If no
+    row has data, the newest row is returned and its values read as None.
+    Legacy list-of-lists data (header row first, oldest to newest) keeps its
+    last row.
     """
     dicts = [r for r in rows if isinstance(r, dict) and r.get("time_tag")]
     if not dicts:
         return rows[-1] if rows else None
     active = [r for r in dicts if r.get("active") is True] or dicts
-    return max(active, key=lambda r: r["time_tag"])
+    newest_first = sorted(active, key=lambda r: r["time_tag"], reverse=True)
+    for row in newest_first:
+        if not fields or any(_to_float(row.get(f)) is not None for f in fields):
+            return row
+    return newest_first[0]
 
 
 class SolarClient:
@@ -171,11 +200,10 @@ class SolarClient:
         if isinstance(sfi_data, list) and sfi_data:
             sfi_data = sfi_data[-1]
         if isinstance(sfi_data, dict):
-            raw = sfi_data.get("Flux") or sfi_data.get("flux") or "0"
-            try:
-                sfi = int(float(raw))
-            except (ValueError, TypeError):
-                pass
+            # No default: a missing value must stay None, not read as SFI 0.
+            value = _to_float(sfi_data.get("Flux") or sfi_data.get("flux"))
+            if value is not None and value > 0:
+                sfi = int(value)
             sfi_time = (
                 sfi_data.get("TimeStamp")
                 or sfi_data.get("timeStamp")
@@ -218,6 +246,11 @@ class SolarClient:
             "noaa_s_scale": s_scale,
             "noaa_g_scale": g_scale,
         }
+
+        _check_parsed(result, [
+            ("SFI", "products/summary/10cm-flux.json", ["sfi"]),
+            ("Kp", "products/noaa-planetary-k-index.json", ["kp"]),
+        ])
 
         # Band outlook
         if sfi is not None and kp is not None:
@@ -341,7 +374,7 @@ class SolarClient:
         bz = bt = None
         mag_time = None
         if isinstance(mag_data, list) and len(mag_data) > 1:
-            latest = _latest_rtsw(mag_data)
+            latest = _latest_rtsw(mag_data, ("bz_gsm", "bz_gse", "bt"))
             if isinstance(latest, dict):
                 mag_time = latest.get("time_tag")
                 bz = _to_float(latest.get("bz_gsm"))
@@ -357,7 +390,7 @@ class SolarClient:
         speed = density = None
         plasma_time = None
         if isinstance(plasma_data, list) and len(plasma_data) > 1:
-            latest = _latest_rtsw(plasma_data)
+            latest = _latest_rtsw(plasma_data, ("proton_density", "proton_speed", "density", "speed"))
             if isinstance(latest, dict):
                 plasma_time = latest.get("time_tag")
                 density = _to_float(latest.get("proton_density") or latest.get("density"))
@@ -387,6 +420,10 @@ class SolarClient:
             else:
                 result["assessment"] = "Northward or neutral Bz — quiet conditions"
 
+        _check_parsed(result, [
+            ("magnetic field", "json/rtsw/rtsw_mag_1m.json", ["bz_gsm_nt", "bt_nt"]),
+            ("plasma", "json/rtsw/rtsw_wind_1m.json", ["speed_km_s", "density_p_cm3"]),
+        ])
         self._cache_set(key, result, _WIND_TTL)
         return result
 
@@ -414,6 +451,8 @@ class SolarClient:
             flare_class = latest.get("current_class", "")
             if not flare_class and flux is not None:
                 flare_class = self._classify_xray(flux)
+        if not flare_class or flare_class == "unknown":
+            flare_class = None  # nothing readable: None, so it's reported
 
         result: dict[str, Any] = {
             "flare_class": flare_class,
@@ -435,6 +474,9 @@ class SolarClient:
             elif c == "A":
                 result["level"] = "Minimal — background levels"
 
+        _check_parsed(result, [
+            ("X-ray flux", "json/goes/primary/xrays-6-hour.json", ["flare_class", "flux_w_m2"]),
+        ])
         self._cache_set(key, result, _XRAY_TTL)
         return result
 

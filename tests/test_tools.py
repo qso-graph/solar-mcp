@@ -325,7 +325,7 @@ class TestGetVersionInfo:
         """SOLAR-L2-043: spec_version pins the NOAA SWPC endpoint set."""
         from solar_mcp.server import _version_info_payload
 
-        assert _version_info_payload()["spec_version"] == "noaa-swpc-v1"
+        assert _version_info_payload()["spec_version"] == "noaa-swpc-v2"
 
     def test_payload_keys_are_required_set(self):
         """SOLAR-L2-044: payload has exactly the required keys (no extras yet)."""
@@ -447,12 +447,28 @@ class TestNoaa2026Formats:
                  "proton_density": -9999, "proton_speed": -9999},
             ],
         })
+        # The newest minute is a gap (-9999): report the minute before, with its time.
         result = client.solar_wind()
-        assert result["bz_gsm_nt"] is None
-        assert result["bt_nt"] is None
-        assert result["speed_km_s"] is None
-        assert result["density_p_cm3"] is None
-        assert "assessment" not in result
+        assert result["bz_gsm_nt"] == -1.0 and result["bt_nt"] == 3.0
+        assert result["mag_timestamp"] == "2026-08-27T14:00:00"
+        assert result["speed_km_s"] == 400.0 and result["density_p_cm3"] == 4.0
+        assert result["plasma_timestamp"] == "2026-08-27T14:01:00"
+        assert -9999 not in result.values()
+
+    def test_solar_wind_all_gaps_is_an_error(self, client, monkeypatch):
+        """Every minute missing data: an error, not a dict of nulls (#10)."""
+        client._get_json = self._fake_get_json({
+            "rtsw_mag_1m.json": [
+                {"time_tag": "2026-08-27T14:00:00", "bz_gsm": -9999, "bt": -9999},
+                {"time_tag": "2026-08-27T14:01:00", "bz_gsm": -9999, "bt": -9999},
+            ],
+            "rtsw_wind_1m.json": [
+                {"time_tag": "2026-08-27T14:01:00", "proton_density": -9999, "proton_speed": -9999},
+                {"time_tag": "2026-08-27T14:02:00", "proton_density": -9999, "proton_speed": -9999},
+            ],
+        })
+        with pytest.raises(RuntimeError, match="format may have changed"):
+            client.solar_wind()
 
     def test_solar_wind_bz_gse_fallback(self, client, monkeypatch):
         """SOLAR-L2-051: bz falls back to bz_gse when bz_gsm is missing data."""
@@ -517,3 +533,48 @@ class TestLatestRtsw:
         from solar_mcp.client import _latest_rtsw
         rows = [["time_tag", "bz", "bt"], ["2026-01-01 00:00", "1", "2"], ["2026-01-01 00:05", "3", "4"]]
         assert _latest_rtsw(rows)[0] == "2026-01-01 00:05"
+
+
+class TestNoaaFormatChange:
+    """When NOAA's data can't be read, say so instead of returning nulls (#10)."""
+
+    @pytest.fixture
+    def live_client(self, monkeypatch):
+        monkeypatch.delenv("SOLAR_MCP_MOCK", raising=False)
+        from solar_mcp.client import SolarClient
+        return SolarClient()
+
+    def test_all_feeds_unreadable_is_an_error(self, live_client, monkeypatch):
+        # Every feed in a shape the parser doesn't know.
+        monkeypatch.setattr(live_client, "_get_json", lambda url: {"unexpected": "shape"})
+        with pytest.raises(RuntimeError, match="10cm-flux.*planetary-k-index.*format may have changed"):
+            live_client.conditions()
+
+    def test_one_feed_unreadable_is_a_warning(self, live_client, monkeypatch):
+        def fake(url):
+            if "10cm-flux" in url:
+                return [{"flux": 95, "time_tag": "2026-09-28T20:00:00"}]
+            return {"unexpected": "shape"}
+        monkeypatch.setattr(live_client, "_get_json", fake)
+        r = live_client.conditions()
+        assert r["sfi"] == 95 and r["kp"] is None
+        assert len(r["warnings"]) == 1 and "noaa-planetary-k-index" in r["warnings"][0]
+
+    def test_solar_wind_unreadable_is_an_error(self, live_client, monkeypatch):
+        monkeypatch.setattr(live_client, "_get_json", lambda url: [{"surprise": 1}, {"surprise": 2}])
+        with pytest.raises(RuntimeError, match="rtsw_mag_1m.*rtsw_wind_1m"):
+            live_client.solar_wind()
+
+    def test_xray_unreadable_is_an_error(self, live_client, monkeypatch):
+        monkeypatch.setattr(live_client, "_get_json", lambda url: [{"surprise": 1}])
+        with pytest.raises(RuntimeError, match="xrays-6-hour"):
+            live_client.xray()
+
+    def test_tool_returns_the_error(self, monkeypatch):
+        from solar_mcp import server
+        class Broken:
+            def conditions(self):
+                raise RuntimeError("NOAA SWPC returned no usable data from SFI (x); its format may have changed")
+        monkeypatch.setattr(server, "_get_client", lambda: Broken())
+        r = server.solar_conditions.fn() if hasattr(server.solar_conditions, "fn") else server.solar_conditions()
+        assert "format may have changed" in r["error"]

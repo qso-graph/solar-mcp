@@ -17,4 +17,4 @@ __version__: Final[str] = _pkg_version
 # contract (different JSON schema, new feed family, etc.). Reported by the
 # get_version_info tool so agents can detect fleet drift without going
 # outside the MCP protocol.
-__spec_version__: Final[str] = "noaa-swpc-v1"
+__spec_version__: Final[str] = "noaa-swpc-v2"
