@@ -11,7 +11,8 @@ Part of the [qso-graph](https://qso-graph.io/) project. **No authentication requ
 ## Install
 
 ```bash
-pip install solar-mcp
+uvx solar-mcp            # run it; nothing to install
+pip install solar-mcp    # or install it into your own environment
 ```
 
 ## Tools
@@ -40,7 +41,8 @@ Add to `claude_desktop_config.json` (`~/Library/Application Support/Claude/` on 
 {
   "mcpServers": {
     "solar": {
-      "command": "solar-mcp"
+      "command": "uvx",
+      "args": ["solar-mcp"]
     }
   }
 }
@@ -54,7 +56,8 @@ Add to `.claude/settings.json`:
 {
   "mcpServers": {
     "solar": {
-      "command": "solar-mcp"
+      "command": "uvx",
+      "args": ["solar-mcp"]
     }
   }
 }
@@ -66,7 +69,8 @@ Add to `.claude/settings.json`:
 {
   "mcpServers": {
     "solar": {
-      "command": "solar-mcp"
+      "command": "uvx",
+      "args": ["solar-mcp"]
     }
   }
 }
@@ -80,7 +84,8 @@ Add to `.cursor/mcp.json` (project-level) or `~/.cursor/mcp.json` (global):
 {
   "mcpServers": {
     "solar": {
-      "command": "solar-mcp"
+      "command": "uvx",
+      "args": ["solar-mcp"]
     }
   }
 }
@@ -94,7 +99,8 @@ Add to `.vscode/mcp.json` in your workspace:
 {
   "servers": {
     "solar": {
-      "command": "solar-mcp"
+      "command": "uvx",
+      "args": ["solar-mcp"]
     }
   }
 }
@@ -108,11 +114,14 @@ Add to `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project):
 {
   "mcpServers": {
     "solar": {
-      "command": "solar-mcp"
+      "command": "uvx",
+      "args": ["solar-mcp"]
     }
   }
 }
 ```
+
+Installed with pip instead? Use `"command": "solar-mcp"` in any config above.
 
 ### Ask questions
 
@@ -145,7 +154,8 @@ solar-mcp --transport streamable-http --port 8008
 ```bash
 git clone https://github.com/qso-graph/solar-mcp.git
 cd solar-mcp
-pip install -e .
+uv sync --group dev
+uv run pytest
 ```
 
 ## License
