@@ -12,7 +12,6 @@ Part of the [qso-graph](https://qso-graph.io/) project. **No authentication requ
 
 ```bash
 uvx solar-mcp            # run it; nothing to install
-pip install solar-mcp    # or install it into your own environment
 ```
 
 ## Tools
@@ -120,8 +119,6 @@ Add to `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project):
   }
 }
 ```
-
-Installed with pip instead? Use `"command": "solar-mcp"` in any config above.
 
 ### Ask questions
 
