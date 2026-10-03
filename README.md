@@ -134,6 +134,20 @@ Add to `~/.gemini/settings.json` (global) or `.gemini/settings.json` (project):
 
 > "What class solar flare is happening?"
 
+## Data Sources
+
+Every value comes from a public [NOAA Space Weather Prediction Center](https://www.swpc.noaa.gov/) endpoint at `services.swpc.noaa.gov`:
+
+| Data | Endpoint | Used by |
+|------|----------|---------|
+| 10.7 cm solar flux (SFI) | `/products/summary/10cm-flux.json` | `solar_conditions`, `solar_band_outlook` |
+| Planetary K-index | `/products/noaa-planetary-k-index.json` | `solar_conditions`, `solar_band_outlook` |
+| NOAA R/S/G scales | `/products/noaa-scales.json` | `solar_conditions` |
+| Space weather alerts | `/products/alerts.json` | `solar_alerts` |
+| 27-day outlook | `/text/27-day-outlook.txt` | `solar_forecast` |
+| Solar wind (real-time, 1 minute) | `/json/rtsw/rtsw_wind_1m.json`, `/json/rtsw/rtsw_mag_1m.json` | `solar_wind` |
+| GOES X-ray flux | `/json/goes/primary/xrays-6-hour.json` | `solar_xray` |
+
 ## Testing Without Network
 
 ```bash
