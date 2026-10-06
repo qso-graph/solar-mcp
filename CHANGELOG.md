@@ -5,6 +5,14 @@ All notable changes to `solar-mcp` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] — 2026-10-06
+
+- PyPI: the Documentation link goes to this package's own page, https://qso-graph.io/servers/solar/ (qso-graph/.github#15).
+- CI: the release flow (qso-graph/.github TEMPLATES.md). Work lands on `develop`; a release is a
+  PR from `develop` into `main`, and merging it publishes to PyPI and the MCP Registry, verifies both
+  and tags the release. CI runs on `develop` too, and PRs into `main` must come from `develop` or a
+  `security/` branch.
+
 ## [0.2.5] — 2026-09-28
 
 ### Changed (#10)
