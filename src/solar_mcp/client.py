@@ -42,11 +42,11 @@ def _to_float(value: Any) -> float | None:
 # ---------------------------------------------------------------------------
 
 _MOCK_SFI = {"timeStamp": "2026-03-04 20:00:00.000", "flux": "175", "area": ""}
-_MOCK_KP = [
+_MOCK_KP: list[list[str]] = [
     ["time_tag", "Kp", "Kp_fraction", "a_running", "station_count"],
     ["2026-03-04 21:00:00.000", "3", "2.67", "15", "8"],
 ]
-_MOCK_SCALES = {
+_MOCK_SCALES: dict[str, Any] = {
     "0": {
         "R": {"Scale": "R0", "Text": "none"},
         "S": {"Scale": "S0", "Text": "none"},
@@ -58,26 +58,26 @@ _MOCK_SCALES = {
         "G": {"Scale": "G1", "Text": "minor"},
     },
 }
-_MOCK_WIND_MAG = [
+_MOCK_WIND_MAG: list[list[str]] = [
     ["time_tag", "bx_gsm", "by_gsm", "bz_gsm", "bt"],
     ["2026-03-04 21:00:00.000", "-2.1", "1.5", "-3.2", "4.1"],
 ]
-_MOCK_WIND_PLASMA = [
+_MOCK_WIND_PLASMA: list[list[str]] = [
     ["time_tag", "density", "speed", "temperature"],
     ["2026-03-04 21:00:00.000", "5.2", "425.0", "85000"],
 ]
-_MOCK_XRAY = [
+_MOCK_XRAY: list[dict[str, Any]] = [
     {"time_tag": "2026-03-04T21:00:00Z", "satellite": 16, "current_class": "B5.2",
      "current_ratio": 5.2e-7, "current_int_xrlong": 5.2e-7},
 ]
-_MOCK_ALERTS = [
+_MOCK_ALERTS: list[dict[str, Any]] = [
     {
         "product_id": "ALTK04",
         "issue_datetime": "2026-03-04T18:00:00Z",
         "message": "ALERT: Geomagnetic K-index of 4\nThreshold Reached: 2026 Mar 04 1800 UTC\nSynoptic Period: 1500-1800 UTC",
     },
 ]
-_MOCK_FORECAST = [
+_MOCK_FORECAST: list[list[str]] = [
     ["2026 Mar 05", "172", "3"],
     ["2026 Mar 06", "170", "2"],
     ["2026 Mar 07", "168", "2"],
@@ -106,7 +106,7 @@ def _check_parsed(result: dict[str, Any], feeds: list[tuple[str, str, list[str]]
         result["warnings"] = [f"{e}: no usable value; NOAA's format may have changed" for e in empty]
 
 
-def _latest_rtsw(rows: list, fields: tuple[str, ...] = ()) -> Any:
+def _latest_rtsw(rows: list[Any], fields: tuple[str, ...] = ()) -> Any:
     """The newest reading from NOAA's real-time solar wind feed.
 
     The rtsw files hold a day of 1-minute rows, newest first, with one row per
@@ -181,7 +181,7 @@ class SolarClient:
     def conditions(self) -> dict[str, Any]:
         """Current solar conditions: SFI, Kp, NOAA scales."""
         key = "conditions"
-        cached = self._cache_get(key)
+        cached: dict[str, Any] | None = self._cache_get(key)
         if cached is not None:
             return cached
 
@@ -266,14 +266,15 @@ class SolarClient:
         req.add_header("User-Agent", f"solar-mcp/{__version__}")
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
-                return resp.read().decode("utf-8", errors="replace")
+                body: bytes = resp.read()
         except (urllib.error.URLError, urllib.error.HTTPError):
             raise RuntimeError("NOAA SWPC request failed")
+        return body.decode("utf-8", errors="replace")
 
     def forecast(self) -> dict[str, Any]:
         """27-day SFI/Kp forecast from NOAA outlook."""
         key = "forecast"
-        cached = self._cache_get(key)
+        cached: dict[str, Any] | None = self._cache_get(key)
         if cached is not None:
             return cached
 
@@ -317,7 +318,7 @@ class SolarClient:
     def alerts(self) -> dict[str, Any]:
         """Active SWPC alerts and warnings (last 24 hours)."""
         key = "alerts"
-        cached = self._cache_get(key)
+        cached: dict[str, Any] | None = self._cache_get(key)
         if cached is not None:
             return cached
 
@@ -359,7 +360,7 @@ class SolarClient:
     def solar_wind(self) -> dict[str, Any]:
         """Real-time DSCOVR L1 solar wind data."""
         key = "wind"
-        cached = self._cache_get(key)
+        cached: dict[str, Any] | None = self._cache_get(key)
         if cached is not None:
             return cached
 
@@ -430,7 +431,7 @@ class SolarClient:
     def xray(self) -> dict[str, Any]:
         """GOES X-ray flux and solar flare status."""
         key = "xray"
-        cached = self._cache_get(key)
+        cached: dict[str, Any] | None = self._cache_get(key)
         if cached is not None:
             return cached
 
@@ -440,7 +441,7 @@ class SolarClient:
             data = self._get_json(f"{_SWPC}/json/goes/primary/xrays-6-hour.json") or []
 
         # Latest reading — NOAA now provides raw flux, not pre-classified
-        flare_class = "unknown"
+        flare_class: str | None = "unknown"
         xray_time = None
         flux = None
         if isinstance(data, list) and len(data) > 0:
@@ -483,7 +484,7 @@ class SolarClient:
     def band_outlook(self) -> dict[str, Any]:
         """HF band condition assessment derived from current indices."""
         key = "band_outlook"
-        cached = self._cache_get(key)
+        cached: dict[str, Any] | None = self._cache_get(key)
         if cached is not None:
             return cached
 
