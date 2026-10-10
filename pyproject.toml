@@ -7,7 +7,7 @@ license = {text = "GPL-3.0-or-later"}
 authors = [{name = "Greg Beam, KI7MT", email = "ki7mt@yahoo.com"}]
 requires-python = ">=3.10"
 dependencies = [
-    "fastmcp>=3.0",
+    "fastmcp>=4.0,<5",
 ]
 keywords = [
     "amateur-radio", "ham-radio", "solar", "space-weather", "sfi", "kp-index",
