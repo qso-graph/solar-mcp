@@ -6,12 +6,12 @@
     "url": "https://github.com/qso-graph/solar-mcp",
     "source": "github"
   },
-  "version": "0.2.7",
+  "version": "0.2.8",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "solar-mcp",
-      "version": "0.2.7",
+      "version": "0.2.8",
       "transport": { "type": "stdio" }
     }
   ],
