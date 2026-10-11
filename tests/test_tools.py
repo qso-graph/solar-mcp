@@ -9,13 +9,13 @@ Test IDs: SOLAR-L2-001 through SOLAR-L2-040
 from __future__ import annotations
 
 import os
+
 import pytest
 
 # Enable mock mode before importing anything
 os.environ["SOLAR_MCP_MOCK"] = "1"
 
 from solar_mcp.client import SolarClient, _to_float
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
