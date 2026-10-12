@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **`certifi` is carried, and every outbound call verifies against it** (#29, qso-graph-devel#73).
+  Both fetches used `urllib` with no context, so they trusted whichever root store the running
+  Python was built against. On macOS that is `/etc/ssl/cert.pem`, a deliberately *reduced*
+  OpenSSL file — 128 roots against the system keychain's 158, and current rather than stale. A
+  certificate chaining to one of the 30 it omits fails for Python while `curl` to the same URL
+  succeeds, and the user is told only that the source could not be reached. That is what stopped
+  `meteor-mcp` reaching NASA. **NOAA verifies fine against the reduced file today**, so this was
+  latent rather than an outage: it would have surfaced the day a CA in the chain rotated.
+- **Verification is never disabled.** `ssl.CERT_NONE` or `check_hostname = False` would also have
+  made such a call "work", by accepting any certificate from anyone — a worse defect, and an
+  invisible one. The fix is a complete root set, not a relaxed check. Three tests hold this: the
+  context asserts `CERT_REQUIRED` and `check_hostname`, the roots are asserted to come from
+  `certifi` and to have actually loaded, and **every `urlopen` line is required to pass the
+  context**, so a new fetch path cannot quietly skip it.
+- `ssl.SSLError` is handled alongside `URLError`, so a trust failure is a clean message rather
+  than a traceback.
+
 - **Tool execution errors are flagged `isError`** (#31). Every tool returned `{"error": "..."}` on
   failure, which reaches a client as a *successful* call whose payload happens to contain the word
   "error". The specification says why that matters: otherwise "the LLM would not be able to see that
