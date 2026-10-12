@@ -8,6 +8,7 @@ authors = [{name = "Greg Beam, KI7MT", email = "maintainers@qso-graph.io"}]
 requires-python = ">=3.10"
 dependencies = [
     "fastmcp>=4.0,<5",
+    "certifi",
 ]
 keywords = [
     "amateur-radio", "ham-radio", "solar", "space-weather", "sfi", "kp-index",
