@@ -6,6 +6,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -166,8 +167,15 @@ class SolarClient:
         self._rate_limit()
         req = urllib.request.Request(url, method="GET")
         req.add_header("User-Agent", f"solar-mcp/{__version__}")
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            # Named, because since #31 this message is what the client sees as
+            # the tool's error. urllib's own text is "<urlopen error [Errno 61]
+            # Connection refused>", which does not say what was being reached,
+            # so a model reading it cannot tell a NOAA outage from a bug here.
+            raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
         if not body or body.strip() == "":
             return None
         # NOAA's file servers occasionally append trailing NUL bytes
@@ -267,8 +275,8 @@ class SolarClient:
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 body: bytes = resp.read()
-        except (urllib.error.URLError, urllib.error.HTTPError):
-            raise RuntimeError("NOAA SWPC request failed")
+        except (urllib.error.URLError, urllib.error.HTTPError) as e:
+            raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
         return body.decode("utf-8", errors="replace")
 
     def forecast(self) -> dict[str, Any]:
@@ -494,7 +502,12 @@ class SolarClient:
         kp = cond.get("kp")
 
         if sfi is None or kp is None:
-            return {"error": "Unable to fetch current conditions"}
+            # Raised rather than returned: the band outlook is derived from SFI
+            # and Kp, so without them there is no answer to give. Returning it
+            # as content would reach the client as a successful call whose
+            # payload happens to say "error", which is what the specification
+            # warns against — the model cannot see the failure and self-correct.
+            raise RuntimeError("Unable to fetch current conditions")
 
         result = self._band_outlook(sfi, kp)
         result["sfi"] = sfi

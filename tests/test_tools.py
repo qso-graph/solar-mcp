@@ -570,11 +570,20 @@ class TestNoaaFormatChange:
         with pytest.raises(RuntimeError, match="xrays-6-hour"):
             live_client.xray()
 
-    def test_tool_returns_the_error(self, monkeypatch):
+    def test_tool_flags_the_error(self, monkeypatch):
+        """The failure reaches the client as a failure, with the message kept.
+
+        This asserted the old shape — a successful result whose payload held an
+        ``error`` key — until #31. The decision is unchanged; only how it is
+        reported is, so the same message is still asserted.
+        """
+        from fastmcp.exceptions import ToolError
+
         from solar_mcp import server
         class Broken:
             def conditions(self):
                 raise RuntimeError("NOAA SWPC returned no usable data from SFI (x); its format may have changed")
         monkeypatch.setattr(server, "_get_client", lambda: Broken())
-        r = server.solar_conditions.fn() if hasattr(server.solar_conditions, "fn") else server.solar_conditions()
-        assert "format may have changed" in r["error"]
+        fn = getattr(server.solar_conditions, "fn", server.solar_conditions)
+        with pytest.raises(ToolError, match="format may have changed"):
+            fn()

@@ -5,6 +5,30 @@ All notable changes to `solar-mcp` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- **Tool execution errors are flagged `isError`** (#31). Every tool returned `{"error": "..."}` on
+  failure, which reaches a client as a *successful* call whose payload happens to contain the word
+  "error". The specification says why that matters: otherwise "the LLM would not be able to see that
+  an error occurred and self-correct". They now raise `ToolError`, which `fastmcp` reports as
+  `isError: true` with the message intact. **No decision changed — only how it is reported.** A
+  partially readable feed is still a successful answer carrying `warnings`, and only a wholly
+  unreadable one is an error, exactly as before.
+- **Every tool declares all four annotation hints** (#31). Declaring nothing is not neutral: the
+  defaults advertise a tool as `destructiveHint: true`, `openWorldHint: true` and not idempotent, and
+  the specification tells clients to keep a human in the loop for operations like that — so a client
+  was entitled to put a confirmation prompt in front of reading the solar flux. All seven are
+  read-only, non-destructive and idempotent; `openWorldHint` is read per tool, true for the six that
+  reach NOAA and false for `get_version_info`, which reports what the wheel carries. Annotations are
+  a client's UX hint and never a security control; they replace no validation here.
+- **A failed fetch now names what it could not reach.** Since the message is what a client now sees,
+  `<urlopen error [Errno 61] Connection refused>` was not enough to tell a NOAA outage from a defect
+  here. Both fetch paths raise `NOAA SWPC request failed (<url>): <reason>`.
+- **`tests/test_mcp_conformance.py`** asserts all of the above, so none of it can regress silently —
+  seventeen checks, following `adif-mcp`'s file of the same name. `get_version_info` is the
+  cautionary case: a fleet convention nobody asserted, which drifted.
+- `urllib.error` is imported rather than relied on as a side effect of importing `urllib.request`.
+
 ## [0.2.8] — 2026-10-11
 
 - **ruff and mypy run in CI** (qso-graph-devel#66), as a job the `ci-all-green` gate requires.
