@@ -463,8 +463,10 @@ class TestNoaa2026Formats:
                 {"time_tag": "2026-08-27T14:01:00", "bz_gsm": -9999, "bt": -9999},
             ],
             "rtsw_wind_1m.json": [
-                {"time_tag": "2026-08-27T14:01:00", "proton_density": -9999, "proton_speed": -9999},
-                {"time_tag": "2026-08-27T14:02:00", "proton_density": -9999, "proton_speed": -9999},
+                {"time_tag": "2026-08-27T14:01:00",
+                 "proton_density": -9999, "proton_speed": -9999},
+                {"time_tag": "2026-08-27T14:02:00",
+                 "proton_density": -9999, "proton_speed": -9999},
             ],
         })
         with pytest.raises(RuntimeError, match="format may have changed"):
@@ -531,7 +533,9 @@ class TestLatestRtsw:
 
     def test_legacy_list_rows_keep_last(self):
         from solar_mcp.client import _latest_rtsw
-        rows = [["time_tag", "bz", "bt"], ["2026-01-01 00:00", "1", "2"], ["2026-01-01 00:05", "3", "4"]]
+        rows = [["time_tag", "bz", "bt"],
+                ["2026-01-01 00:00", "1", "2"],
+                ["2026-01-01 00:05", "3", "4"]]
         assert _latest_rtsw(rows)[0] == "2026-01-01 00:05"
 
 
@@ -547,7 +551,8 @@ class TestNoaaFormatChange:
     def test_all_feeds_unreadable_is_an_error(self, live_client, monkeypatch):
         # Every feed in a shape the parser doesn't know.
         monkeypatch.setattr(live_client, "_get_json", lambda url: {"unexpected": "shape"})
-        with pytest.raises(RuntimeError, match="10cm-flux.*planetary-k-index.*format may have changed"):
+        with pytest.raises(RuntimeError,
+                           match="10cm-flux.*planetary-k-index.*format may have changed"):
             live_client.conditions()
 
     def test_one_feed_unreadable_is_a_warning(self, live_client, monkeypatch):
@@ -561,7 +566,8 @@ class TestNoaaFormatChange:
         assert len(r["warnings"]) == 1 and "noaa-planetary-k-index" in r["warnings"][0]
 
     def test_solar_wind_unreadable_is_an_error(self, live_client, monkeypatch):
-        monkeypatch.setattr(live_client, "_get_json", lambda url: [{"surprise": 1}, {"surprise": 2}])
+        monkeypatch.setattr(live_client, "_get_json",
+                            lambda url: [{"surprise": 1}, {"surprise": 2}])
         with pytest.raises(RuntimeError, match="rtsw_mag_1m.*rtsw_wind_1m"):
             live_client.solar_wind()
 
@@ -582,7 +588,10 @@ class TestNoaaFormatChange:
         from solar_mcp import server
         class Broken:
             def conditions(self):
-                raise RuntimeError("NOAA SWPC returned no usable data from SFI (x); its format may have changed")
+                raise RuntimeError(
+                    "NOAA SWPC returned no usable data from SFI (x); "
+                    "its format may have changed"
+                )
         monkeypatch.setattr(server, "_get_client", lambda: Broken())
         fn = getattr(server.solar_conditions, "fn", server.solar_conditions)
         with pytest.raises(ToolError, match="format may have changed"):
