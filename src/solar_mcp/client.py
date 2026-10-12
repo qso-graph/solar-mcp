@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from functools import cache
 from typing import Any
 
@@ -67,6 +68,54 @@ def _to_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return None if f == -9999 else f
+
+
+def _scale(letter: str, raw: Any) -> str:
+    """NOAA's level for one scale, as the letter and the digit together.
+
+    NOAA sends the level as a bare digit — ``"0"`` on a quiet day, ``"2"`` in a
+    G2 storm. Only ``"0"`` was being prefixed, so a quiet day reported ``"G0"``
+    and a storm reported ``"2"``: the one time the value matters it lost the
+    letter saying which scale it belonged to, and a caller could not tell a G2
+    from an R2 (qso-graph/solar-mcp#28).
+
+    A value that already carries a letter is kept, but only under its own
+    letter. ``"G2"`` arriving in the ``R`` slot is not an R-scale reading and
+    is not reported as one.
+    """
+    if raw is None:
+        return "unknown"
+    value = str(raw).strip()
+    if value.isdigit():
+        return f"{letter}{value}"
+    if len(value) == 2 and value[0].upper() == letter and value[1].isdigit():
+        return f"{letter}{value[1]}"
+    return "unknown"
+
+
+def _reading_time(value: Any, label: str, warnings: list[str]) -> str | None:
+    """A timestamp NOAA sent, if it is a real instant.
+
+    NOAA has sent impossible dates — ``2026-02-30T21:00:00`` has no 30th of
+    February — and these were passed through as the time of the reading, which
+    dates the value wrongly rather than admitting the time is unusable. The
+    value itself is still reported; only its time is dropped, and the warning
+    says what arrived so a format change is visible rather than silent.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # NOAA uses both "T" and a space, and sometimes a trailing Z. Normalised
+    # here rather than per feed, because every feed has its own habit.
+    probe = text.rstrip("Zz").replace(" ", "T")
+    try:
+        datetime.fromisoformat(probe)
+    except ValueError:
+        warnings.append(f"{label}: {text!r} is not a usable time; NOAA's format may have changed")
+        return None
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -249,38 +298,41 @@ class SolarClient:
                 or sfi_data.get("time_tag")
             )
 
-        # Parse latest Kp — NOAA returns dict rows {"time_tag":..., "Kp":...}
+        # Parse latest Kp — NOAA returns dict rows {"time_tag":..., "Kp":...}.
+        # The same rows carry a_running, the running A index, which hams read
+        # beside K — reported here because it is already in hand (#28).
         kp = None
         kp_time = None
+        a_index = None
         if isinstance(kp_data, list) and len(kp_data) > 1:
             latest = kp_data[-1]
             if isinstance(latest, dict):
                 kp = _to_float(latest.get("Kp") or latest.get("kp"))
                 kp_time = latest.get("time_tag") or latest.get("timeStamp")
+                a_index = _to_float(latest.get("a_running"))
             elif isinstance(latest, list) and len(latest) >= 2:
                 kp = _to_float(latest[1])
                 kp_time = latest[0]
+                # The legacy header row names the columns; a_running is the
+                # fourth where it is present at all.
+                if len(latest) >= 4:
+                    a_index = _to_float(latest[3])
 
         # Parse NOAA scales (current = "0", 24hr max = "-1")
         r_scale = s_scale = g_scale = "unknown"
         if isinstance(scales_data, dict):
             current = scales_data.get("0", {})
-            r_scale = current.get("R", {}).get("Scale", "unknown")
-            s_scale = current.get("S", {}).get("Scale", "unknown")
-            g_scale = current.get("G", {}).get("Scale", "unknown")
-            # NOAA reports no storm as "0"; show it as R0/S0/G0 like the other levels.
-            if r_scale == "0":
-                r_scale = "R0"
-            if s_scale == "0":
-                s_scale = "S0"
-            if g_scale == "0":
-                g_scale = "G0"
+            r_scale = _scale("R", current.get("R", {}).get("Scale"))
+            s_scale = _scale("S", current.get("S", {}).get("Scale"))
+            g_scale = _scale("G", current.get("G", {}).get("Scale"))
 
+        time_warnings: list[str] = []
         result: dict[str, Any] = {
             "sfi": sfi,
-            "sfi_timestamp": sfi_time,
+            "sfi_timestamp": _reading_time(sfi_time, "SFI timestamp", time_warnings),
             "kp": kp,
-            "kp_timestamp": kp_time,
+            "kp_timestamp": _reading_time(kp_time, "Kp timestamp", time_warnings),
+            "a_index": a_index,
             "noaa_r_scale": r_scale,
             "noaa_s_scale": s_scale,
             "noaa_g_scale": g_scale,
@@ -290,6 +342,10 @@ class SolarClient:
             ("SFI", "products/summary/10cm-flux.json", ["sfi"]),
             ("Kp", "products/noaa-planetary-k-index.json", ["kp"]),
         ])
+        # After _check_parsed, which assigns the list it builds. An unusable
+        # time is a warning beside the value, not a reason to withhold it.
+        if time_warnings:
+            result.setdefault("warnings", []).extend(time_warnings)
 
         # Band outlook
         if sfi is not None and kp is not None:

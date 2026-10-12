@@ -1,0 +1,20 @@
+{
+  "producedBy": "solar-mcp, SolarClient.conditions() over these files. The G scale reads \"G2\" since #28; solar-mcp 0.2.6 left a non-zero level as the bare digit \"2\".",
+  "sfi": 168,
+  "kp": 5.67,
+  "noaa_r_scale": "R0",
+  "noaa_s_scale": "S0",
+  "noaa_g_scale": "G2",
+  "bands": {
+    "160m": "Poor — storm absorption",
+    "80m": "Poor — D-layer absorption and noise",
+    "40m": "Fair — reduced DX",
+    "30m": "Good — transition band, usually open",
+    "20m": "Excellent — degraded by geomagnetic storm",
+    "17m": "Good — degraded by geomagnetic storm",
+    "15m": "Excellent — degraded by geomagnetic storm",
+    "12m": "Good — degraded by geomagnetic storm",
+    "10m": "Excellent — degraded by geomagnetic storm",
+    "6m": "Sporadic — watch for Es openings"
+  }
+}
