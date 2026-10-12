@@ -29,11 +29,15 @@ FIXTURES = Path(__file__).parent / "fixtures" / "noaa"
 # and the answers either side computes are no longer comparable.
 DESKTOP_SUMS = {
     "quiet/10cm-flux.json": "2138583f6f96a59ab0c9f43cfec454b0cd844cccfaa36c1f3631c2d413d20858",
-    "quiet/noaa-planetary-k-index.json": "9eb4122adc5d795965b528c70a766cfaab2f4f389d9364bccdf0bb22a0fdd239",
-    "quiet/noaa-scales.json": "62c3233ad19470a76e19c9205b02419c3d7340e2f8205373d10b24621576d4c4",
+    "quiet/noaa-planetary-k-index.json":
+        "9eb4122adc5d795965b528c70a766cfaab2f4f389d9364bccdf0bb22a0fdd239",
+    "quiet/noaa-scales.json":
+        "62c3233ad19470a76e19c9205b02419c3d7340e2f8205373d10b24621576d4c4",
     "storm/10cm-flux.json": "47463078883fd10daee99f72e16d6ee2cf29cf974f8a35133ce4c5443be4a0ce",
-    "storm/noaa-planetary-k-index.json": "ea45dc16d611a72645a1a2a39297e0c8bfa4e2c417235e311bb4c9c7264460cb",
-    "storm/noaa-scales.json": "f2d1b143dc4d726c0ff35a745ba9f64e4e775d20c07d54753c0879fc04539b79",
+    "storm/noaa-planetary-k-index.json":
+        "ea45dc16d611a72645a1a2a39297e0c8bfa4e2c417235e311bb4c9c7264460cb",
+    "storm/noaa-scales.json":
+        "f2d1b143dc4d726c0ff35a745ba9f64e4e775d20c07d54753c0879fc04539b79",
 }
 
 # What conditions() asks NOAA for, and which recorded file answers it.

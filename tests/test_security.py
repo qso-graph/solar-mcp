@@ -137,5 +137,7 @@ def test_every_outbound_call_verifies():
              if "urllib.request.urlopen(" in line]
     assert calls, "no urlopen call found; has the fetch path moved?"
     for number, line in calls:
-        assert "context=_context()" in line, \
-            f"client.py:{number} opens a connection without a verifying context: {line.strip()}"
+        assert "context=_context()" in line, (
+            f"client.py:{number} opens a connection without a verifying context: "
+            f"{line.strip()}"
+        )

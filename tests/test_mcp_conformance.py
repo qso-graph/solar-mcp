@@ -111,7 +111,9 @@ class TestToolAnnotations:
         that no outbound call exists; here, that one does.
         """
         src = pathlib.Path(server.__file__).parent
-        outbound = re.compile(r"urllib\.request\.(urlopen|Request)|httpx\.|requests\.(get|post)")
+        outbound = re.compile(
+            r"urllib\.request\.(urlopen|Request)|httpx\.|requests\.(get|post)"
+        )
         reached = [p.name for p in src.rglob("*.py")
                    if outbound.search(p.read_text(encoding="utf-8", errors="replace"))]
         assert reached, "no outbound call found, so openWorldHint: True is not honest"
@@ -142,7 +144,9 @@ class TestToolErrorsAreFlagged:
         class Broken:
             def __getattr__(self, _name):
                 def fail(*_args, **_kwargs):
-                    raise RuntimeError("NOAA SWPC returned no usable data; its format may have changed")
+                    raise RuntimeError(
+                        "NOAA SWPC returned no usable data; its format may have changed"
+                    )
                 return fail
 
         monkeypatch.setattr(server, "_get_client", lambda: Broken())

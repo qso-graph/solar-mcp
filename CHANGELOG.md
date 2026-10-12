@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **`E501` is adopted** (#30, qso-graph-devel#70). It was deliberately ignored while the rules
+  that find defects went in first; this is the pass of its own that deferral was waiting for. It
+  reported **20 lines in this repo, none of them a defect**, and all but one reflowed with no name
+  shortened. The exception is explicit rather than silent: one line in `client.py` carries NOAA's
+  own alert text, newlines included, as the thing the parser has to read — its shape is the point,
+  so it holds a `# noqa: E501` with the reason written above it. Formatting and config only; no
+  behaviour changes, and the suite is unchanged at 99 passed.
+
 - **Fixed: a non-zero NOAA scale level lost its letter** (#28). NOAA sends the level as a bare
   digit, and only `"0"` was being prefixed — so a quiet day reported `G0` while a **G2 storm
   reported `"2"`**. The one reading that matters was the one a caller could not identify, since

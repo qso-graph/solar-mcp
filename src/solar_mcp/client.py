@@ -113,7 +113,9 @@ def _reading_time(value: Any, label: str, warnings: list[str]) -> str | None:
     try:
         datetime.fromisoformat(probe)
     except ValueError:
-        warnings.append(f"{label}: {text!r} is not a usable time; NOAA's format may have changed")
+        warnings.append(
+            f"{label}: {text!r} is not a usable time; NOAA's format may have changed"
+        )
         return None
     return text
 
@@ -155,7 +157,9 @@ _MOCK_ALERTS: list[dict[str, Any]] = [
     {
         "product_id": "ALTK04",
         "issue_datetime": "2026-03-04T18:00:00Z",
-        "message": "ALERT: Geomagnetic K-index of 4\nThreshold Reached: 2026 Mar 04 1800 UTC\nSynoptic Period: 1500-1800 UTC",
+        # NOAA's own alert text, reproduced exactly, newlines included: this
+        # stands in for what the parser has to read, so its shape is the point.
+        "message": "ALERT: Geomagnetic K-index of 4\nThreshold Reached: 2026 Mar 04 1800 UTC\nSynoptic Period: 1500-1800 UTC",  # noqa: E501
     },
 ]
 _MOCK_FORECAST: list[list[str]] = [
@@ -184,7 +188,9 @@ def _check_parsed(result: dict[str, Any], feeds: list[tuple[str, str, list[str]]
             + "; its format may have changed"
         )
     if empty:
-        result["warnings"] = [f"{e}: no usable value; NOAA's format may have changed" for e in empty]
+        result["warnings"] = [
+            f"{e}: no usable value; NOAA's format may have changed" for e in empty
+        ]
 
 
 def _latest_rtsw(rows: list[Any], fields: tuple[str, ...] = ()) -> Any:
@@ -486,7 +492,9 @@ class SolarClient:
         speed = density = None
         plasma_time = None
         if isinstance(plasma_data, list) and len(plasma_data) > 1:
-            latest = _latest_rtsw(plasma_data, ("proton_density", "proton_speed", "density", "speed"))
+            latest = _latest_rtsw(
+                plasma_data, ("proton_density", "proton_speed", "density", "speed")
+            )
             if isinstance(latest, dict):
                 plasma_time = latest.get("time_tag")
                 density = _to_float(latest.get("proton_density") or latest.get("density"))
@@ -571,7 +579,8 @@ class SolarClient:
                 result["level"] = "Minimal — background levels"
 
         _check_parsed(result, [
-            ("X-ray flux", "json/goes/primary/xrays-6-hour.json", ["flare_class", "flux_w_m2"]),
+            ("X-ray flux", "json/goes/primary/xrays-6-hour.json",
+             ["flare_class", "flux_w_m2"]),
         ])
         self._cache_set(key, result, _XRAY_TTL)
         return result
