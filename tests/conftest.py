@@ -3,7 +3,8 @@ import pytest
 
 
 def pytest_addoption(parser):
-    parser.addoption("--live", action="store_true", default=False, help="Run live API integration tests")
+    parser.addoption("--live", action="store_true", default=False,
+                     help="Run live API integration tests")
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "live: mark test as requiring live API access")

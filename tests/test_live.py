@@ -61,7 +61,8 @@ def test_conditions_band_outlook(client):
 def test_forecast_minimum_days(client):
     """SOLAR-L3-005: Forecast must return at least 3 days."""
     result = client.forecast()
-    assert result["total_days"] >= 3, f"Expected >= 3 forecast days, got {result['total_days']}"
+    assert result["total_days"] >= 3, \
+        f"Expected >= 3 forecast days, got {result['total_days']}"
     assert len(result["forecast"]) >= 3
 
 

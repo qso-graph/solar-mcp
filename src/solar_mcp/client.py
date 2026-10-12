@@ -4,14 +4,47 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import threading
 import time
+import urllib.error
 import urllib.request
+from datetime import datetime
+from functools import cache
 from typing import Any
+
+import certifi
 
 from . import __version__
 
 _SWPC = "https://services.swpc.noaa.gov"
+
+
+@cache
+def _context() -> ssl.SSLContext:
+    """A verifying context with a current root set. Built once.
+
+    The roots come from ``certifi`` rather than whichever store the running
+    Python was built against. On macOS that distinction is real: Apple ships
+    ``/etc/ssl/cert.pem`` for OpenSSL — and therefore for Python — as a
+    deliberately *reduced* file, 128 roots against the system keychain's 158.
+    It is current, not stale. But a certificate chaining to one of the 30 it
+    omits fails for Python while ``curl`` to the same URL succeeds, and the
+    user is told only that the source could not be reached (qso-graph-devel#73,
+    found when meteor-mcp could not reach NASA at all).
+
+    NOAA verifies fine against the reduced file today, so this is a latent
+    defect rather than an outage: the day any CA in the chain rotates to a root
+    Apple omits, this server stops working on macOS with no hint that trust is
+    the cause.
+
+    Verification is never disabled. ``ssl.CERT_NONE`` or ``check_hostname =
+    False`` would also make a call "work", by accepting any certificate from
+    anyone — a worse defect than this one, and an invisible one. The fix is a
+    complete root set, not a relaxed check.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
+
 
 # Cache TTLs
 _CONDITIONS_TTL = 900.0  # 15 minutes (SFI/Kp update slowly)
@@ -35,6 +68,56 @@ def _to_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return None if f == -9999 else f
+
+
+def _scale(letter: str, raw: Any) -> str:
+    """NOAA's level for one scale, as the letter and the digit together.
+
+    NOAA sends the level as a bare digit — ``"0"`` on a quiet day, ``"2"`` in a
+    G2 storm. Only ``"0"`` was being prefixed, so a quiet day reported ``"G0"``
+    and a storm reported ``"2"``: the one time the value matters it lost the
+    letter saying which scale it belonged to, and a caller could not tell a G2
+    from an R2 (qso-graph/solar-mcp#28).
+
+    A value that already carries a letter is kept, but only under its own
+    letter. ``"G2"`` arriving in the ``R`` slot is not an R-scale reading and
+    is not reported as one.
+    """
+    if raw is None:
+        return "unknown"
+    value = str(raw).strip()
+    if value.isdigit():
+        return f"{letter}{value}"
+    if len(value) == 2 and value[0].upper() == letter and value[1].isdigit():
+        return f"{letter}{value[1]}"
+    return "unknown"
+
+
+def _reading_time(value: Any, label: str, warnings: list[str]) -> str | None:
+    """A timestamp NOAA sent, if it is a real instant.
+
+    NOAA has sent impossible dates — ``2026-02-30T21:00:00`` has no 30th of
+    February — and these were passed through as the time of the reading, which
+    dates the value wrongly rather than admitting the time is unusable. The
+    value itself is still reported; only its time is dropped, and the warning
+    says what arrived so a format change is visible rather than silent.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # NOAA uses both "T" and a space, and sometimes a trailing Z. Normalised
+    # here rather than per feed, because every feed has its own habit.
+    probe = text.rstrip("Zz").replace(" ", "T")
+    try:
+        datetime.fromisoformat(probe)
+    except ValueError:
+        warnings.append(
+            f"{label}: {text!r} is not a usable time; NOAA's format may have changed"
+        )
+        return None
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +157,9 @@ _MOCK_ALERTS: list[dict[str, Any]] = [
     {
         "product_id": "ALTK04",
         "issue_datetime": "2026-03-04T18:00:00Z",
-        "message": "ALERT: Geomagnetic K-index of 4\nThreshold Reached: 2026 Mar 04 1800 UTC\nSynoptic Period: 1500-1800 UTC",
+        # NOAA's own alert text, reproduced exactly, newlines included: this
+        # stands in for what the parser has to read, so its shape is the point.
+        "message": "ALERT: Geomagnetic K-index of 4\nThreshold Reached: 2026 Mar 04 1800 UTC\nSynoptic Period: 1500-1800 UTC",  # noqa: E501
     },
 ]
 _MOCK_FORECAST: list[list[str]] = [
@@ -103,7 +188,9 @@ def _check_parsed(result: dict[str, Any], feeds: list[tuple[str, str, list[str]]
             + "; its format may have changed"
         )
     if empty:
-        result["warnings"] = [f"{e}: no usable value; NOAA's format may have changed" for e in empty]
+        result["warnings"] = [
+            f"{e}: no usable value; NOAA's format may have changed" for e in empty
+        ]
 
 
 def _latest_rtsw(rows: list[Any], fields: tuple[str, ...] = ()) -> Any:
@@ -166,8 +253,15 @@ class SolarClient:
         self._rate_limit()
         req = urllib.request.Request(url, method="GET")
         req.add_header("User-Agent", f"solar-mcp/{__version__}")
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
+        try:
+            with urllib.request.urlopen(req, timeout=15, context=_context()) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except (urllib.error.URLError, urllib.error.HTTPError, ssl.SSLError) as e:
+            # Named, because since #31 this message is what the client sees as
+            # the tool's error. urllib's own text is "<urlopen error [Errno 61]
+            # Connection refused>", which does not say what was being reached,
+            # so a model reading it cannot tell a NOAA outage from a bug here.
+            raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
         if not body or body.strip() == "":
             return None
         # NOAA's file servers occasionally append trailing NUL bytes
@@ -210,38 +304,41 @@ class SolarClient:
                 or sfi_data.get("time_tag")
             )
 
-        # Parse latest Kp — NOAA returns dict rows {"time_tag":..., "Kp":...}
+        # Parse latest Kp — NOAA returns dict rows {"time_tag":..., "Kp":...}.
+        # The same rows carry a_running, the running A index, which hams read
+        # beside K — reported here because it is already in hand (#28).
         kp = None
         kp_time = None
+        a_index = None
         if isinstance(kp_data, list) and len(kp_data) > 1:
             latest = kp_data[-1]
             if isinstance(latest, dict):
                 kp = _to_float(latest.get("Kp") or latest.get("kp"))
                 kp_time = latest.get("time_tag") or latest.get("timeStamp")
+                a_index = _to_float(latest.get("a_running"))
             elif isinstance(latest, list) and len(latest) >= 2:
                 kp = _to_float(latest[1])
                 kp_time = latest[0]
+                # The legacy header row names the columns; a_running is the
+                # fourth where it is present at all.
+                if len(latest) >= 4:
+                    a_index = _to_float(latest[3])
 
         # Parse NOAA scales (current = "0", 24hr max = "-1")
         r_scale = s_scale = g_scale = "unknown"
         if isinstance(scales_data, dict):
             current = scales_data.get("0", {})
-            r_scale = current.get("R", {}).get("Scale", "unknown")
-            s_scale = current.get("S", {}).get("Scale", "unknown")
-            g_scale = current.get("G", {}).get("Scale", "unknown")
-            # NOAA reports no storm as "0"; show it as R0/S0/G0 like the other levels.
-            if r_scale == "0":
-                r_scale = "R0"
-            if s_scale == "0":
-                s_scale = "S0"
-            if g_scale == "0":
-                g_scale = "G0"
+            r_scale = _scale("R", current.get("R", {}).get("Scale"))
+            s_scale = _scale("S", current.get("S", {}).get("Scale"))
+            g_scale = _scale("G", current.get("G", {}).get("Scale"))
 
+        time_warnings: list[str] = []
         result: dict[str, Any] = {
             "sfi": sfi,
-            "sfi_timestamp": sfi_time,
+            "sfi_timestamp": _reading_time(sfi_time, "SFI timestamp", time_warnings),
             "kp": kp,
-            "kp_timestamp": kp_time,
+            "kp_timestamp": _reading_time(kp_time, "Kp timestamp", time_warnings),
+            "a_index": a_index,
             "noaa_r_scale": r_scale,
             "noaa_s_scale": s_scale,
             "noaa_g_scale": g_scale,
@@ -251,6 +348,10 @@ class SolarClient:
             ("SFI", "products/summary/10cm-flux.json", ["sfi"]),
             ("Kp", "products/noaa-planetary-k-index.json", ["kp"]),
         ])
+        # After _check_parsed, which assigns the list it builds. An unusable
+        # time is a warning beside the value, not a reason to withhold it.
+        if time_warnings:
+            result.setdefault("warnings", []).extend(time_warnings)
 
         # Band outlook
         if sfi is not None and kp is not None:
@@ -265,10 +366,10 @@ class SolarClient:
         req = urllib.request.Request(url, method="GET")
         req.add_header("User-Agent", f"solar-mcp/{__version__}")
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=15, context=_context()) as resp:
                 body: bytes = resp.read()
-        except (urllib.error.URLError, urllib.error.HTTPError):
-            raise RuntimeError("NOAA SWPC request failed")
+        except (urllib.error.URLError, urllib.error.HTTPError, ssl.SSLError) as e:
+            raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
         return body.decode("utf-8", errors="replace")
 
     def forecast(self) -> dict[str, Any]:
@@ -391,7 +492,9 @@ class SolarClient:
         speed = density = None
         plasma_time = None
         if isinstance(plasma_data, list) and len(plasma_data) > 1:
-            latest = _latest_rtsw(plasma_data, ("proton_density", "proton_speed", "density", "speed"))
+            latest = _latest_rtsw(
+                plasma_data, ("proton_density", "proton_speed", "density", "speed")
+            )
             if isinstance(latest, dict):
                 plasma_time = latest.get("time_tag")
                 density = _to_float(latest.get("proton_density") or latest.get("density"))
@@ -476,7 +579,8 @@ class SolarClient:
                 result["level"] = "Minimal — background levels"
 
         _check_parsed(result, [
-            ("X-ray flux", "json/goes/primary/xrays-6-hour.json", ["flare_class", "flux_w_m2"]),
+            ("X-ray flux", "json/goes/primary/xrays-6-hour.json",
+             ["flare_class", "flux_w_m2"]),
         ])
         self._cache_set(key, result, _XRAY_TTL)
         return result
@@ -494,7 +598,12 @@ class SolarClient:
         kp = cond.get("kp")
 
         if sfi is None or kp is None:
-            return {"error": "Unable to fetch current conditions"}
+            # Raised rather than returned: the band outlook is derived from SFI
+            # and Kp, so without them there is no answer to give. Returning it
+            # as content would reach the client as a successful call whose
+            # payload happens to say "error", which is what the specification
+            # warns against — the model cannot see the failure and self-correct.
+            raise RuntimeError("Unable to fetch current conditions")
 
         result = self._band_outlook(sfi, kp)
         result["sfi"] = sfi
