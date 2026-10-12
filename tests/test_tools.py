@@ -596,3 +596,34 @@ class TestNoaaFormatChange:
         fn = getattr(server.solar_conditions, "fn", server.solar_conditions)
         with pytest.raises(ToolError, match="format may have changed"):
             fn()
+
+
+class TestTlsAtRuntime:
+    """What the built context actually is.
+
+    `test_security.py` reads the source for this, because the release gate runs
+    that file with the package not installed. These assertions need the real
+    object, so they live here, where CI runs them with it present. Follows
+    `meteor-mcp`, which put the same test beside its tools.
+    """
+
+    def test_verification_is_on(self):
+        """SOLAR-L2-050: CERT_REQUIRED, and the hostname is checked."""
+        import ssl
+
+        from solar_mcp.client import _context
+
+        context = _context()
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname is True
+
+    def test_the_root_store_actually_loaded(self):
+        """SOLAR-L2-051: an empty store fails closed and looks like an outage.
+
+        The symptom this whole change exists to end is "the source could not be
+        reached" with no hint that trust is the cause, so a context carrying no
+        roots would reproduce it exactly.
+        """
+        from solar_mcp.client import _context
+
+        assert _context().cert_store_stats()["x509_ca"] > 100
