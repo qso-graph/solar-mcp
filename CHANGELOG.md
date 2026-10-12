@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fixed: a non-zero NOAA scale level lost its letter** (#28). NOAA sends the level as a bare
+  digit, and only `"0"` was being prefixed — so a quiet day reported `G0` while a **G2 storm
+  reported `"2"`**. The one reading that matters was the one a caller could not identify, since
+  `"2"` could as easily have been R2 or S2. Every level now carries its letter, and a prefixed
+  value is kept only under its own letter: `"G2"` arriving in the R slot is not an R-scale reading
+  and is not reported as one.
+- **The A index is reported** (#28). `a_running` already rides along in the rows the Kp is read
+  from, so it cost no request. Hams read A beside K.
+- **An unusable timestamp is no longer passed through as the reading's time** (#28). NOAA has sent
+  impossible dates — `2026-02-30T21:00:00` has no 30th of February — and these dated the reading
+  wrongly. The reading still stands; only its time is dropped, with a warning naming what arrived
+  so a format change is visible rather than silent.
+- **The recorded NOAA responses are shared with QSO Graph Desktop** (#28), in
+  `tests/fixtures/noaa/`. Desktop's Conditions card follows `SolarClient`, so solar-mcp is the
+  specification for its behaviour (`QGD-HOM-0008`); holding both to the same bytes is what makes
+  that true rather than merely stated. The three NOAA files are byte-identical to Desktop's and
+  asserted so by SHA-256, so a careless edit here is caught and the pair has to be updated
+  together.
+
 - **`certifi` is carried, and every outbound call verifies against it** (#29, qso-graph-devel#73).
   Both fetches used `urllib` with no context, so they trusted whichever root store the running
   Python was built against. On macOS that is `/etc/ssl/cert.pem`, a deliberately *reduced*
