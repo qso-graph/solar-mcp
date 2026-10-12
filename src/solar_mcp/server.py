@@ -6,6 +6,7 @@ import sys
 from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 from . import __spec_version__, __version__
 from .client import SolarClient
@@ -35,6 +36,33 @@ def _get_client() -> SolarClient:
 # Tools
 # ---------------------------------------------------------------------------
 
+# MCP 2026-07-28 tool annotations. The defaults are pessimistic — a tool that
+# declares nothing is advertised as destructive, non-idempotent and open-world,
+# and the specification tells a client to keep a human in the loop for an
+# operation like that. So a client would be entitled to put a confirmation
+# prompt in front of reading the solar flux. Every tool here reads NOAA and
+# writes nothing, so the three effect hints are the same for all of them; only
+# openWorldHint differs, and it is the one that has to be read per tool.
+#
+# They are a client's UX hint and never a security control: the specification
+# requires clients to treat them as untrusted, so none of this replaces the
+# input validation in client.py.
+_READS_NOAA = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    # Reaches services.swpc.noaa.gov, which is outside this host.
+    "openWorldHint": True,
+}
+_ANSWERS_FROM_THE_PACKAGE = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    # Reports versions carried in the wheel. It opens no connection, so a
+    # client need not treat it as reaching anything.
+    "openWorldHint": False,
+}
+
 
 def _version_info_payload() -> dict[str, Any]:
     """Build the version info envelope. Pulled into a helper so tests can
@@ -46,7 +74,7 @@ def _version_info_payload() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANSWERS_FROM_THE_PACKAGE)
 def get_version_info() -> dict[str, Any]:
     """Get solar-mcp service version and upstream spec version.
 
@@ -63,7 +91,7 @@ def get_version_info() -> dict[str, Any]:
     return _version_info_payload()
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS_NOAA)
 def solar_conditions() -> dict[str, Any]:
     """Get current solar conditions — SFI, Kp, and NOAA space weather scales.
 
@@ -77,10 +105,10 @@ def solar_conditions() -> dict[str, Any]:
     try:
         return _get_client().conditions()
     except Exception as e:
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS_NOAA)
 def solar_forecast() -> dict[str, Any]:
     """Get the NOAA 27-day solar flux and geomagnetic forecast.
 
@@ -93,10 +121,10 @@ def solar_forecast() -> dict[str, Any]:
     try:
         return _get_client().forecast()
     except Exception as e:
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS_NOAA)
 def solar_alerts() -> dict[str, Any]:
     """Get active NOAA space weather alerts and warnings.
 
@@ -109,10 +137,10 @@ def solar_alerts() -> dict[str, Any]:
     try:
         return _get_client().alerts()
     except Exception as e:
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS_NOAA)
 def solar_wind() -> dict[str, Any]:
     """Get real-time DSCOVR L1 solar wind data.
 
@@ -127,10 +155,10 @@ def solar_wind() -> dict[str, Any]:
     try:
         return _get_client().solar_wind()
     except Exception as e:
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS_NOAA)
 def solar_xray() -> dict[str, Any]:
     """Get GOES X-ray flux and solar flare status.
 
@@ -143,10 +171,10 @@ def solar_xray() -> dict[str, Any]:
     try:
         return _get_client().xray()
     except Exception as e:
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READS_NOAA)
 def solar_band_outlook() -> dict[str, Any]:
     """Get HF band-by-band propagation outlook based on current conditions.
 
@@ -161,7 +189,7 @@ def solar_band_outlook() -> dict[str, Any]:
     try:
         return _get_client().band_outlook()
     except Exception as e:
-        return {"error": str(e)}
+        raise ToolError(str(e)) from e
 
 
 # ---------------------------------------------------------------------------
