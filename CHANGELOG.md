@@ -5,52 +5,13 @@ All notable changes to `solar-mcp` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] — 2026-10-12
 
-- **`E501` is adopted** (#30, qso-graph-devel#70). It was deliberately ignored while the rules
-  that find defects went in first; this is the pass of its own that deferral was waiting for. It
-  reported **20 lines in this repo, none of them a defect**, and all but one reflowed with no name
-  shortened. The exception is explicit rather than silent: one line in `client.py` carries NOAA's
-  own alert text, newlines included, as the thing the parser has to read — its shape is the point,
-  so it holds a `# noqa: E501` with the reason written above it. Formatting and config only; no
-  behaviour changes, and the suite is unchanged at 99 passed.
-
-- **Fixed: a non-zero NOAA scale level lost its letter** (#28). NOAA sends the level as a bare
-  digit, and only `"0"` was being prefixed — so a quiet day reported `G0` while a **G2 storm
-  reported `"2"`**. The one reading that matters was the one a caller could not identify, since
-  `"2"` could as easily have been R2 or S2. Every level now carries its letter, and a prefixed
-  value is kept only under its own letter: `"G2"` arriving in the R slot is not an R-scale reading
-  and is not reported as one.
-- **The A index is reported** (#28). `a_running` already rides along in the rows the Kp is read
-  from, so it cost no request. Hams read A beside K.
-- **An unusable timestamp is no longer passed through as the reading's time** (#28). NOAA has sent
-  impossible dates — `2026-02-30T21:00:00` has no 30th of February — and these dated the reading
-  wrongly. The reading still stands; only its time is dropped, with a warning naming what arrived
-  so a format change is visible rather than silent.
-- **The recorded NOAA responses are shared with QSO Graph Desktop** (#28), in
-  `tests/fixtures/noaa/`. Desktop's Conditions card follows `SolarClient`, so solar-mcp is the
-  specification for its behaviour (`QGD-HOM-0008`); holding both to the same bytes is what makes
-  that true rather than merely stated. The three NOAA files are byte-identical to Desktop's and
-  asserted so by SHA-256, so a careless edit here is caught and the pair has to be updated
-  together.
-
-- **`certifi` is carried, and every outbound call verifies against it** (#29, qso-graph-devel#73).
-  Both fetches used `urllib` with no context, so they trusted whichever root store the running
-  Python was built against. On macOS that is `/etc/ssl/cert.pem`, a deliberately *reduced*
-  OpenSSL file — 128 roots against the system keychain's 158, and current rather than stale. A
-  certificate chaining to one of the 30 it omits fails for Python while `curl` to the same URL
-  succeeds, and the user is told only that the source could not be reached. That is what stopped
-  `meteor-mcp` reaching NASA. **NOAA verifies fine against the reduced file today**, so this was
-  latent rather than an outage: it would have surfaced the day a CA in the chain rotated.
-- **Verification is never disabled.** `ssl.CERT_NONE` or `check_hostname = False` would also have
-  made such a call "work", by accepting any certificate from anyone — a worse defect, and an
-  invisible one. The fix is a complete root set, not a relaxed check. Three tests hold this: the
-  context asserts `CERT_REQUIRED` and `check_hostname`, the roots are asserted to come from
-  `certifi` and to have actually loaded, and **every `urlopen` line is required to pass the
-  context**, so a new fetch path cannot quietly skip it.
-- `ssl.SSLError` is handled alongside `URLError`, so a trust failure is a clean message rather
-  than a traceback.
-
+**Upgrading:** a tool that fails now returns `isError: true` instead of a successful result whose
+payload contained an `error` key. Anything reading `result["error"]` should read the error flag.
+No decision changed — a partially readable feed is still a successful answer carrying `warnings`,
+and only a wholly unreadable one is an error. `conditions()` also gains `a_index`, and a non-zero
+NOAA scale level now reads `G2` rather than `2`.
 - **Tool execution errors are flagged `isError`** (#31). Every tool returned `{"error": "..."}` on
   failure, which reaches a client as a *successful* call whose payload happens to contain the word
   "error". The specification says why that matters: otherwise "the LLM would not be able to see that
@@ -68,9 +29,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A failed fetch now names what it could not reach.** Since the message is what a client now sees,
   `<urlopen error [Errno 61] Connection refused>` was not enough to tell a NOAA outage from a defect
   here. Both fetch paths raise `NOAA SWPC request failed (<url>): <reason>`.
+- **Fixed: a non-zero NOAA scale level lost its letter** (#28). NOAA sends the level as a bare
+  digit, and only `"0"` was being prefixed — so a quiet day reported `G0` while a **G2 storm
+  reported `"2"`**. The one reading that matters was the one a caller could not identify, since
+  `"2"` could as easily have been R2 or S2. Every level now carries its letter, and a prefixed
+  value is kept only under its own letter: `"G2"` arriving in the R slot is not an R-scale reading
+  and is not reported as one.
+- **The A index is reported** (#28). `a_running` already rides along in the rows the Kp is read
+  from, so it cost no request. Hams read A beside K.
+- **An unusable timestamp is no longer passed through as the reading's time** (#28). NOAA has sent
+  impossible dates — `2026-02-30T21:00:00` has no 30th of February — and these dated the reading
+  wrongly. The reading still stands; only its time is dropped, with a warning naming what arrived
+  so a format change is visible rather than silent.
+- **`certifi` is carried, and every outbound call verifies against it** (#29, qso-graph-devel#73).
+  Both fetches used `urllib` with no context, so they trusted whichever root store the running
+  Python was built against. On macOS that is `/etc/ssl/cert.pem`, a deliberately *reduced*
+  OpenSSL file — 128 roots against the system keychain's 158, and current rather than stale. A
+  certificate chaining to one of the 30 it omits fails for Python while `curl` to the same URL
+  succeeds, and the user is told only that the source could not be reached. That is what stopped
+  `meteor-mcp` reaching NASA. **NOAA verifies fine against the reduced file today**, so this was
+  latent rather than an outage: it would have surfaced the day a CA in the chain rotated.
+- **Verification is never disabled.** `ssl.CERT_NONE` or `check_hostname = False` would also have
+  made such a call "work", by accepting any certificate from anyone — a worse defect, and an
+  invisible one. The fix is a complete root set, not a relaxed check. Three tests hold this: the
+  context asserts `CERT_REQUIRED` and `check_hostname`, the roots are asserted to come from
+  `certifi` and to have actually loaded, and **every `urlopen` line is required to pass the
+  context**, so a new fetch path cannot quietly skip it.
+- `ssl.SSLError` is handled alongside `URLError`, so a trust failure is a clean message rather
+  than a traceback.
+- **The recorded NOAA responses are shared with QSO Graph Desktop** (#28), in
+  `tests/fixtures/noaa/`. Desktop's Conditions card follows `SolarClient`, so solar-mcp is the
+  specification for its behaviour (`QGD-HOM-0008`); holding both to the same bytes is what makes
+  that true rather than merely stated. The three NOAA files are byte-identical to Desktop's and
+  asserted so by SHA-256, so a careless edit here is caught and the pair has to be updated
+  together.
 - **`tests/test_mcp_conformance.py`** asserts all of the above, so none of it can regress silently —
   seventeen checks, following `adif-mcp`'s file of the same name. `get_version_info` is the
   cautionary case: a fleet convention nobody asserted, which drifted.
+- **`E501` is adopted** (#30, qso-graph-devel#70). It was deliberately ignored while the rules
+  that find defects went in first; this is the pass of its own that deferral was waiting for. It
+  reported **20 lines in this repo, none of them a defect**, and all but one reflowed with no name
+  shortened. The exception is explicit rather than silent: one line in `client.py` carries NOAA's
+  own alert text, newlines included, as the thing the parser has to read — its shape is the point,
+  so it holds a `# noqa: E501` with the reason written above it. Formatting and config only; no
+  behaviour changes, and the suite is unchanged at 99 passed.
 - `urllib.error` is imported rather than relied on as a side effect of importing `urllib.request`.
 
 ## [0.2.8] — 2026-10-11
