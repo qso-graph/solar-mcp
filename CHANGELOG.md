@@ -12,6 +12,16 @@ payload contained an `error` key. Anything reading `result["error"]` should read
 No decision changed — a partially readable feed is still a successful answer carrying `warnings`,
 and only a wholly unreadable one is an error. `conditions()` also gains `a_index`, and a non-zero
 NOAA scale level now reads `G2` rather than `2`.
+- **The release gate runs with the package not installed, and now says so.** `publish.yml` runs
+  `tests/test_security.py` after `pip install pytest pip-audit` — deliberately, because those
+  checks read the source tree rather than import it — while `ci.yml` runs the suite with
+  `--ignore=tests/test_security.py`. So that file executes in exactly one environment, and it is
+  the one where `import solar_mcp` raises. Two checks added with #29 imported it; every suite was
+  green and the 0.3.0 publish run failed at the gate, publishing nothing. The TLS checks there are
+  static again (and read code rather than prose, so a docstring explaining why `CERT_NONE` is wrong
+  is not mistaken for `CERT_NONE`), the runtime assertions moved to `test_tools.py` where CI runs
+  them with the package present, and `tests/test_release_gate.py` now asserts the precondition
+  itself: the gate suite imports nothing but the standard library and pytest.
 - **Tool execution errors are flagged `isError`** (#31). Every tool returned `{"error": "..."}` on
   failure, which reaches a client as a *successful* call whose payload happens to contain the word
   "error". The specification says why that matters: otherwise "the LLM would not be able to see that
@@ -72,7 +82,7 @@ NOAA scale level now reads `G2` rather than `2`.
   shortened. The exception is explicit rather than silent: one line in `client.py` carries NOAA's
   own alert text, newlines included, as the thing the parser has to read — its shape is the point,
   so it holds a `# noqa: E501` with the reason written above it. Formatting and config only; no
-  behaviour changes, and the suite is unchanged at 99 passed.
+  behaviour changes, and the suite was unchanged by it.
 - `urllib.error` is imported rather than relied on as a side effect of importing `urllib.request`.
 
 ## [0.2.8] — 2026-10-11

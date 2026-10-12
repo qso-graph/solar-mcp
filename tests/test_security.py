@@ -15,6 +15,25 @@ def _py_files():
     yield from SRC_DIR.rglob("*.py")
 
 
+def _code_only(path: Path) -> str:
+    """The file with comments and string literals removed.
+
+    Some of these checks must read what the code *does*, not what it says about
+    itself. `_context()` carries a docstring explaining that `ssl.CERT_NONE`
+    would be the wrong fix, and a plain text search cannot tell that sentence
+    apart from the thing it warns against.
+    """
+    import tokenize
+
+    kept = []
+    with path.open("rb") as handle:
+        for token in tokenize.tokenize(handle.readline):
+            if token.type in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            kept.append(token.string)
+    return " ".join(kept)
+
+
 def test_no_print_credentials():
     """Guarantee #1: Credentials never in logs (print statements)."""
     forbidden = re.compile(
@@ -81,22 +100,24 @@ def test_no_eval_exec():
                 assert False, f"eval/exec in {py_file.name}:{i}: {stripped.strip()}"
 
 
-def test_tls_verification_is_on():
-    """Guarantee #8: TLS verification is never disabled.
+def test_tls_verification_is_never_disabled():
+    """Guarantee #8: no context here stops checking certificates.
 
-    This is the one way to get qso-graph-devel#73 wrong. ``ssl.CERT_NONE`` or
-    ``check_hostname = False`` would also make a failing call "work", by
-    accepting any certificate from anyone — a worse defect than the one being
-    fixed, and an invisible one. The fix is a complete root set, not a relaxed
-    check.
+    ``ssl.CERT_NONE`` or ``check_hostname = False`` would make a failing call
+    "work", by accepting any certificate from anyone — a worse defect than the
+    one qso-graph-devel#73 fixes, and an invisible one. The fix is a complete
+    root set, not a relaxed check.
+
+    Read off the source, like every check in this file: the release gate runs it
+    with the package *not installed* (`pip install pytest pip-audit`), so nothing
+    here may import `solar_mcp`. The runtime assertions — that the built context
+    really is CERT_REQUIRED with check_hostname on — live in test_tools.py, which
+    CI runs with the package present. Both are needed; neither replaces the other.
     """
-    import ssl
-
-    from solar_mcp.client import _context
-
-    context = _context()
-    assert context.verify_mode == ssl.CERT_REQUIRED
-    assert context.check_hostname is True
+    forbidden = re.compile(r"CERT_NONE|check_hostname\s*=\s*False|_create_unverified")
+    for py_file in _py_files():
+        matches = forbidden.findall(_code_only(py_file))
+        assert not matches, f"TLS verification weakened in {py_file.name}: {matches}"
 
 
 def test_the_root_set_is_carried_not_borrowed():
@@ -108,17 +129,8 @@ def test_the_root_set_is_carried_not_borrowed():
     while ``curl`` to the same URL succeeds, and the user is told only that the
     source could not be reached.
     """
-    from solar_mcp.client import _context
-
-    # Where the roots come from. A context cannot be asked which file it was
-    # built from, so this is read off the source — the one claim a runtime
-    # check cannot make.
-    source = (SRC_DIR / "solar_mcp" / "client.py").read_text()
-    assert "cafile=certifi.where()" in source
-
-    # And that the file actually loaded. An empty store would fail closed and
-    # look exactly like an outage, which is the symptom this is meant to end.
-    assert _context().cert_store_stats()["x509_ca"] > 100
+    client = (SRC_DIR / "solar_mcp" / "client.py").read_text()
+    assert "cafile=certifi.where()" in client
 
 
 def test_every_outbound_call_verifies():
