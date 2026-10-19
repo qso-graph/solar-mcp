@@ -81,7 +81,13 @@ jobs:
 
       - name: Grep check — no plaintext http://
         run: |
-          if grep -rn 'http://' src/ | grep -v 'localhost\|127\.0\.0\.1\|::1'; then
+          # Tests the output, not the exit status: the exit status of a "grep -v"
+          # pipeline is not portable, so this reported FAIL on a clean tree when
+          # run locally. CI was unaffected (ubuntu/GNU grep), which is why it went
+          # unnoticed across the fleet.
+          hits="$(grep -rn 'http://' src/ | grep -v 'localhost\|127\.0\.0\.1\|::1' || true)"
+          if [ -n "$hits" ]; then
+            echo "$hits"
             echo "FAIL: non-HTTPS URL found in source"
             exit 1
           fi
