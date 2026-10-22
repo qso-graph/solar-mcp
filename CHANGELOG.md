@@ -5,6 +5,15 @@ All notable changes to `solar-mcp` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+- **The band ratings are defined** ([BAND-OUTLOOK.md](BAND-OUTLOOK.md)). No standard defines
+  band-condition words, so this one does: Excellent, Good, Fair, Poor and Sporadic, each with what
+  it means on the air, and every band's rule beside them, stated as rules of thumb on SFI and Kp
+  rather than a propagation model. `solar_band_outlook`'s description now names all five (it
+  listed four, without Sporadic), and tests hold every rating to them and pin each band's rule at every threshold. No
+  rating changed. QSO Graph Desktop's Conditions card uses the same scale.
+
 ## [0.3.0] — 2026-10-12
 
 **Upgrading:** a tool that fails now returns `isError: true` instead of a successful result whose
