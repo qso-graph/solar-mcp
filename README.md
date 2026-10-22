@@ -23,7 +23,7 @@ uvx solar-mcp            # run it; nothing to install
 | `solar_alerts` | Active space weather alerts and warnings |
 | `solar_wind` | Real-time DSCOVR L1 solar wind (Bz, speed, density) |
 | `solar_xray` | GOES X-ray flux and solar flare classification |
-| `solar_band_outlook` | HF band-by-band propagation assessment (160m-6m) |
+| `solar_band_outlook` | HF band-by-band propagation assessment (160m-6m), each band rated on the scale in [BAND-OUTLOOK.md](BAND-OUTLOOK.md) |
 | `get_version_info` | Service version + upstream spec version (fleet identity attestation) |
 
 ## Quick Start
