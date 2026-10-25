@@ -78,6 +78,79 @@ class TestClassifyXray:
 
 
 class TestBandOutlook:
+    SCALE = ("Excellent", "Good", "Fair", "Poor", "Sporadic")
+
+    def test_every_rating_is_on_the_scale(self):
+        """Every rating, at every SFI and Kp, is one of the five words of
+        BAND-OUTLOOK.md followed by a comment."""
+        for sfi in (60, 85, 95, 110, 125, 135, 145, 155, 170):
+            for kp in (0.0, 3.0, 4.0, 5.0, 8.0):
+                for band, rating in SolarClient._band_outlook(sfi, kp)["bands"].items():
+                    status, _, comment = rating.partition(" — ")
+                    assert status in self.SCALE, (sfi, kp, band, rating)
+                    assert comment, (sfi, kp, band, rating)
+
+    @pytest.mark.parametrize(
+        ("sfi", "kp", "band", "status"),
+        [
+        (100, 2.9, "160m", "Good"),
+        (100, 3.0, "160m", "Fair"),
+        (100, 4.9, "160m", "Fair"),
+        (100, 5.0, "160m", "Poor"),
+        (100, 3.9, "80m", "Good"),
+        (100, 4.0, "80m", "Fair"),
+        (100, 5.0, "80m", "Poor"),
+        (100, 4.9, "40m", "Good"),
+        (100, 5.0, "40m", "Fair"),
+        (60, 8.0, "30m", "Good"),
+        (99, 1.0, "20m", "Fair"),
+        (100, 1.0, "20m", "Good"),
+        (149, 1.0, "20m", "Good"),
+        (150, 1.0, "20m", "Excellent"),
+        (89, 1.0, "17m", "Poor"),
+        (90, 1.0, "17m", "Fair"),
+        (119, 1.0, "17m", "Fair"),
+        (120, 1.0, "17m", "Good"),
+        (79, 1.0, "15m", "Poor"),
+        (80, 1.0, "15m", "Fair"),
+        (99, 1.0, "15m", "Fair"),
+        (100, 1.0, "15m", "Good"),
+        (139, 1.0, "15m", "Good"),
+        (140, 1.0, "15m", "Excellent"),
+        (119, 1.0, "12m", "Poor"),
+        (120, 1.0, "12m", "Fair"),
+        (149, 1.0, "12m", "Fair"),
+        (150, 1.0, "12m", "Good"),
+        (99, 1.0, "10m", "Poor"),
+        (100, 1.0, "10m", "Fair"),
+        (129, 1.0, "10m", "Fair"),
+        (130, 1.0, "10m", "Good"),
+        (159, 1.0, "10m", "Good"),
+        (160, 1.0, "10m", "Excellent"),
+        (200, 0.0, "6m", "Sporadic"),
+        ],
+    )
+    def test_each_rule_at_its_thresholds(self, sfi, kp, band, status):
+        """Each band's rule in BAND-OUTLOOK.md, just below and at every threshold."""
+        rating = SolarClient._band_outlook(sfi, kp)["bands"][band]
+        assert rating.partition(" — ")[0] == status, rating
+
+    def test_a_storm_keeps_the_status_and_says_so(self):
+        """K >= 5: 20m-10m keep the status their flux gives, with the storm comment."""
+        bands = SolarClient._band_outlook(150, 5.0)["bands"]
+        assert bands["20m"] == "Excellent — degraded by geomagnetic storm"
+        assert bands["17m"] == "Good — degraded by geomagnetic storm"
+        calm = SolarClient._band_outlook(150, 4.9)["bands"]
+        assert calm["20m"] == "Excellent — strong F-layer, long openings"
+
+    def test_the_scale_document_defines_each_word(self):
+        """BAND-OUTLOOK.md defines all five, so the words are not left to guess."""
+        from pathlib import Path
+        scale = Path(__file__).resolve().parents[1] / "BAND-OUTLOOK.md"
+        text = scale.read_text(encoding="utf-8")
+        for word in self.SCALE:
+            assert f"| **{word}** |" in text, word
+
     def test_all_bands_present(self):
         """SOLAR-L2-010: Outlook includes all 10 HF bands."""
         result = SolarClient._band_outlook(150, 2.0)

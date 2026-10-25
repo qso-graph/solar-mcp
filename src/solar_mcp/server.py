@@ -182,9 +182,17 @@ def solar_band_outlook() -> dict[str, Any]:
     from the current SFI and Kp values. Useful for deciding which band
     to operate on right now.
 
+    Each band is rated "<status> — <comment>", the status one of five words
+    defined in BAND-OUTLOOK.md: Excellent (wide open, strong long-lasting DX),
+    Good (regular DX openings in the band's usual hours), Fair (short, patchy
+    or weak openings; DX possible, not dependable), Poor (likely closed for DX,
+    or degraded by absorption and noise), Sporadic (not graded from the
+    indices: 6m opens by sporadic-E, and by F2 at high solar flux). The
+    thresholds are rules of thumb on SFI and Kp, not a propagation model.
+
     Returns:
-        Per-band condition rating (Poor/Fair/Good/Excellent) with explanation,
-        plus current SFI and Kp values.
+        Per-band condition rating with explanation, plus current SFI and Kp
+        values.
     """
     try:
         return _get_client().band_outlook()
