@@ -5,7 +5,7 @@ All notable changes to `solar-mcp` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.3.1] — 2026-10-26
 
 - **The band ratings are defined** ([BAND-OUTLOOK.md](BAND-OUTLOOK.md)). No standard defines
   band-condition words, so this one does: Excellent, Good, Fair, Poor and Sporadic, each with what
