@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import ssl
 import threading
@@ -93,6 +94,12 @@ def _retry_after(header: str | None) -> float:
     try:
         seconds = float(header) if header else 0.0
     except ValueError:
+        seconds = 0.0
+    # "nan" and "inf" parse as floats, and nan defeats the clamp below: every
+    # comparison against it is False, so it would survive to be added to a
+    # deadline that is then never in the future, leaving the block off
+    # altogether. A header we cannot make sense of means the floor.
+    if not math.isfinite(seconds):
         seconds = 0.0
     return min(max(seconds, _MIN_BACKOFF), _MAX_BACKOFF)
 
@@ -286,12 +293,30 @@ class SolarClient:
         self._cache[key] = (time.monotonic() + ttl, value)
 
     def _rate_limit(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._last_request
-            if elapsed < _MIN_DELAY:
-                time.sleep(_MIN_DELAY - elapsed)
-            self._last_request = time.monotonic()
+        """Space requests out, or refuse if NOAA has told us to stop.
+
+        The gap between requests is slept, because that is what pacing is for. An interval
+        asked for by a 429 is not: this server answers a synchronous tool call
+        behind a client timeout, so sleeping out a minute or an hour inside one
+        is a hang rather than restraint.
+
+        The spacing sleep is taken *outside* the lock, and the loop re-reads
+        the state after it. Without the re-read, a request that a 429 arriving
+        during the sleep had just forbidden would still go out -- the check
+        would have been made before the wait rather than before the request.
+        """
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                remaining = self._blocked_until - now
+                if remaining > 0:
+                    raise RateLimited(remaining)
+                elapsed = now - self._last_request
+                if elapsed >= _MIN_DELAY:
+                    self._last_request = now
+                    return
+                delay = _MIN_DELAY - elapsed
+            time.sleep(delay)
 
     def _fetch(self, url: str) -> bytes:
         """The one outbound path, so the request limits have one home.
@@ -299,12 +324,6 @@ class SolarClient:
         Both _get_json and _get_text go through here; when the 429 contract
         lived in each of them separately it was two places to keep in step.
         """
-        with self._lock:
-            remaining = self._blocked_until - time.monotonic()
-        if remaining > 0:
-            # Still inside a wait NOAA asked for. Refusing here is the point:
-            # the alternative is sending the request it told us not to send.
-            raise RateLimited(remaining)
         self._rate_limit()
         req = urllib.request.Request(url, method="GET")
         req.add_header("User-Agent", f"solar-mcp/{__version__}")
@@ -316,9 +335,14 @@ class SolarClient:
             # shedding load deliberately; a bare 503 is an outage and falls
             # through to the named message below.
             if e.code == 429 or (e.code == 503 and e.headers.get("Retry-After")):
-                wait = _retry_after(e.headers.get("Retry-After"))
+                # An outstanding block is never shortened: a response asking for
+                # 60 s that lands while a 300 s block is still running must not
+                # release us at 60. The wait raised is the one actually in force.
+                asked = _retry_after(e.headers.get("Retry-After"))
                 with self._lock:
-                    self._blocked_until = time.monotonic() + wait
+                    now = time.monotonic()
+                    self._blocked_until = max(self._blocked_until, now + asked)
+                    wait = self._blocked_until - now
                 raise RateLimited(wait) from e
             raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
         except (urllib.error.URLError, ssl.SSLError) as e:

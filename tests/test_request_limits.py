@@ -8,6 +8,7 @@ its limit at runtime. See qso-graph-devel/planning/MCP-SECURITY-FRAMEWORK.md.
 
 from __future__ import annotations
 
+import time
 import urllib.error
 from email.message import Message
 
@@ -171,3 +172,107 @@ def test_network_failure_still_names_the_provider(
     cl = c.SolarClient()
     with pytest.raises(RuntimeError, match='NOAA SWPC request failed'):
         cl._get_json(_URL)
+
+
+def _client():
+    cl = c.SolarClient()
+    return cl
+
+
+def _raises(exc):
+    def f(*a: object, **k: object):
+        raise exc
+    return f
+
+
+# One name for "make the outbound call", so the tests below read the same in
+# every repo even where the method behind it differs.
+c.SolarClient._fetch_for_test = lambda self: self._fetch(_URL)  # type: ignore[attr-defined]
+
+
+# --- defects found by review, held here so they stay fixed ----------------
+
+
+@pytest.mark.parametrize("header", ["nan", "NaN", "inf", "infinity"])
+def test_a_non_finite_header_still_blocks(header: str) -> None:
+    """nan defeats a clamp -- every comparison against it is False -- so it
+    would reach a deadline that is never in the future and leave the block off
+    altogether. The floor applies instead."""
+    assert c._retry_after(header) == c._MIN_BACKOFF
+
+
+def test_a_shorter_later_block_does_not_shorten_a_longer_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A response asking for 60 s landing while a 300 s block runs must not
+    release us at 60."""
+    cl = _client()
+    cl._last_request = 0.0
+    monkeypatch.setattr(
+        c.urllib.request, "urlopen", _raises(_http_error(429, Retry_After="300"))
+    )
+    with pytest.raises(c.RateLimited) as first:
+        cl._fetch_for_test()
+    assert first.value.retry_after == 300
+
+    # A 60 s answer now, as a slower in-flight request would bring back.
+    monkeypatch.setattr(
+        c.urllib.request, "urlopen", _raises(_http_error(429, Retry_After="60"))
+    )
+    cl._blocked_until = 0.0  # let one through, to reach the arming code again
+    cl._last_request = 0.0
+    with pytest.raises(c.RateLimited):
+        cl._fetch_for_test()
+    deadline_after_60 = cl._blocked_until
+
+    # Arming again with 300 and then 60 must leave the 300 standing.
+    cl._blocked_until = 0.0
+    cl._last_request = 0.0
+    monkeypatch.setattr(
+        c.urllib.request, "urlopen", _raises(_http_error(429, Retry_After="300"))
+    )
+    with pytest.raises(c.RateLimited):
+        cl._fetch_for_test()
+    long_deadline = cl._blocked_until
+    assert long_deadline > deadline_after_60
+
+
+def test_a_block_arriving_during_the_gap_is_honoured() -> None:
+    """The check must be made before the request, not before the wait: a 429
+    landing while a caller sleeps out the spacing gap has to stop it."""
+    import threading
+
+    cl = _client()
+    cl._last_request = time.monotonic()   # the next call sleeps out the gap
+    refused: list[BaseException] = []
+
+    def caller() -> None:
+        try:
+            cl._rate_limit()
+        except c.RateLimited as e:
+            refused.append(e)
+
+    t = threading.Thread(target=caller)
+    t.start()
+    with cl._lock:
+        cl._blocked_until = time.monotonic() + 300.0   # arrives mid-sleep
+    t.join(timeout=5)
+    assert refused, "a request went out that a 429 had already forbidden"
+
+
+def test_the_spacing_sleep_does_not_hold_the_lock() -> None:
+    """Sleeping under the lock would block an unrelated caller from even
+    reading the state, and is how the mid-sleep 429 above gets missed."""
+    import threading
+
+    cl = _client()
+    cl._last_request = time.monotonic()
+    threading.Thread(target=cl._rate_limit, daemon=True).start()
+    time.sleep(min(0.02, c._MIN_DELAY / 4))
+    start = time.monotonic()
+    acquired = cl._lock.acquire(timeout=max(1.0, c._MIN_DELAY))
+    held = time.monotonic() - start
+    if acquired:
+        cl._lock.release()
+    assert acquired, "the lock was held for the whole spacing sleep"
+    assert held < c._MIN_DELAY, f"waited {held:.3f}s for the lock"
