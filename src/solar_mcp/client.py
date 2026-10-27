@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import ssl
 import threading
@@ -55,6 +56,52 @@ _XRAY_TTL = 300.0  # 5 minutes
 
 # Rate limiting
 _MIN_DELAY = 0.2
+
+# What to do when NOAA SWPC says stop.
+#
+# A 429 carrying Retry-After is the provider stating its limit outright, and it
+# is the most explicit form of the stated limit guarantee 8 requires honouring.
+# The interval is bounded rather than taken verbatim: a header asking for a day
+# would strand an interactive tool, and one asking for nothing would let us
+# hammer. See qso-graph-devel/planning/MCP-SECURITY-FRAMEWORK.md.
+_MIN_BACKOFF = 60.0
+_MAX_BACKOFF = 3600.0
+
+
+class RateLimited(RuntimeError):
+    """NOAA SWPC asked us to stop. The message is safe to show a user.
+
+    A RuntimeError subclass so callers that already handle this client's
+    failures keep working, and so FastMCP flags the tool result isError either
+    way.
+    """
+
+    def __init__(self, wait: float) -> None:
+        self.retry_after = max(1, round(wait))
+        super().__init__(
+            "NOAA SWPC is rate limiting this client; try again in "
+            f"{self.retry_after} s"
+        )
+
+
+def _retry_after(header: str | None) -> float:
+    """Seconds to wait, from a Retry-After header, clamped to our bounds.
+
+    Retry-After may also be an HTTP date. That form is not parsed and falls back
+    to the floor rather than guessing, because a wrong parse would either hammer
+    NOAA SWPC or strand the user.
+    """
+    try:
+        seconds = float(header) if header else 0.0
+    except ValueError:
+        seconds = 0.0
+    # "nan" and "inf" parse as floats, and nan defeats the clamp below: every
+    # comparison against it is False, so it would survive to be added to a
+    # deadline that is then never in the future, leaving the block off
+    # altogether. A header we cannot make sense of means the floor.
+    if not math.isfinite(seconds):
+        seconds = 0.0
+    return min(max(seconds, _MIN_BACKOFF), _MAX_BACKOFF)
 
 
 def _is_mock() -> bool:
@@ -222,6 +269,10 @@ class SolarClient:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._last_request: float = 0.0
+        # Set by a 429: no call goes out before this. Shared by every endpoint,
+        # because the limit is the provider's view of this client, not of one
+        # path.
+        self._blocked_until: float = 0.0
         self._cache: dict[str, tuple[float, Any]] = {}
 
     # ------------------------------------------------------------------
@@ -242,26 +293,68 @@ class SolarClient:
         self._cache[key] = (time.monotonic() + ttl, value)
 
     def _rate_limit(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            elapsed = now - self._last_request
-            if elapsed < _MIN_DELAY:
-                time.sleep(_MIN_DELAY - elapsed)
-            self._last_request = time.monotonic()
+        """Space requests out, or refuse if NOAA has told us to stop.
 
-    def _get_json(self, url: str) -> Any:
+        The gap between requests is slept, because that is what pacing is for. An interval
+        asked for by a 429 is not: this server answers a synchronous tool call
+        behind a client timeout, so sleeping out a minute or an hour inside one
+        is a hang rather than restraint.
+
+        The spacing sleep is taken *outside* the lock, and the loop re-reads
+        the state after it. Without the re-read, a request that a 429 arriving
+        during the sleep had just forbidden would still go out -- the check
+        would have been made before the wait rather than before the request.
+        """
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                remaining = self._blocked_until - now
+                if remaining > 0:
+                    raise RateLimited(remaining)
+                elapsed = now - self._last_request
+                if elapsed >= _MIN_DELAY:
+                    self._last_request = now
+                    return
+                delay = _MIN_DELAY - elapsed
+            time.sleep(delay)
+
+    def _fetch(self, url: str) -> bytes:
+        """The one outbound path, so the request limits have one home.
+
+        Both _get_json and _get_text go through here; when the 429 contract
+        lived in each of them separately it was two places to keep in step.
+        """
         self._rate_limit()
         req = urllib.request.Request(url, method="GET")
         req.add_header("User-Agent", f"solar-mcp/{__version__}")
         try:
             with urllib.request.urlopen(req, timeout=15, context=_context()) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-        except (urllib.error.URLError, urllib.error.HTTPError, ssl.SSLError) as e:
+                body: bytes = resp.read()
+        except urllib.error.HTTPError as e:
+            # 503 counts only when it carries Retry-After, which is a provider
+            # shedding load deliberately; a bare 503 is an outage and falls
+            # through to the named message below.
+            if e.code == 429 or (e.code == 503 and e.headers.get("Retry-After")):
+                # An outstanding block is never shortened: a response asking for
+                # 60 s that lands while a 300 s block is still running must not
+                # release us at 60. The wait raised is the one actually in force.
+                asked = _retry_after(e.headers.get("Retry-After"))
+                with self._lock:
+                    now = time.monotonic()
+                    self._blocked_until = max(self._blocked_until, now + asked)
+                    wait = self._blocked_until - now
+                raise RateLimited(wait) from e
+            raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
+        except (urllib.error.URLError, ssl.SSLError) as e:
             # Named, because since #31 this message is what the client sees as
             # the tool's error. urllib's own text is "<urlopen error [Errno 61]
             # Connection refused>", which does not say what was being reached,
             # so a model reading it cannot tell a NOAA outage from a bug here.
             raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
+        return body
+
+    def _get_json(self, url: str) -> Any:
+        body = self._fetch(url).decode("utf-8", errors="replace")
         if not body or body.strip() == "":
             return None
         # NOAA's file servers occasionally append trailing NUL bytes
@@ -362,15 +455,7 @@ class SolarClient:
 
     def _get_text(self, url: str) -> str:
         """HTTP GET, return raw text."""
-        self._rate_limit()
-        req = urllib.request.Request(url, method="GET")
-        req.add_header("User-Agent", f"solar-mcp/{__version__}")
-        try:
-            with urllib.request.urlopen(req, timeout=15, context=_context()) as resp:
-                body: bytes = resp.read()
-        except (urllib.error.URLError, urllib.error.HTTPError, ssl.SSLError) as e:
-            raise RuntimeError(f"NOAA SWPC request failed ({url}): {e}") from e
-        return body.decode("utf-8", errors="replace")
+        return self._fetch(url).decode("utf-8", errors="replace")
 
     def forecast(self) -> dict[str, Any]:
         """27-day SFI/Kp forecast from NOAA outlook."""
