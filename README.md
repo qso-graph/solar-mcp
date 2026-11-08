@@ -4,9 +4,9 @@
 [![PyPI](https://img.shields.io/pypi/v/solar-mcp?label=PyPI&color=blue)](https://pypi.org/project/solar-mcp/)
 [![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dio.github.qso-graph%2Fsolar-mcp%26version%3Dlatest&query=%24.servers%5B0%5D.server.version&label=MCP%20Registry&color=blue)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.qso-graph/solar-mcp&version=latest)
 
-MCP server for space weather and HF propagation conditions — live solar flux, Kp index, DSCOVR solar wind, X-ray flux, alerts, 27-day forecast, and band-by-band outlook through any MCP-compatible AI assistant.
+MCP server for space weather and HF propagation conditions—live solar flux, Kp index, DSCOVR solar wind, X-ray flux, alerts, 27-day forecast, and band-by-band outlook through any MCP-compatible AI assistant.
 
-Part of the [qso-graph](https://qso-graph.io/) project. **No authentication required** — all data from [NOAA SWPC](https://www.swpc.noaa.gov/) public endpoints.
+Part of the [qso-graph](https://qso-graph.io/) project. **No authentication required**—all data from [NOAA SWPC](https://www.swpc.noaa.gov/) public endpoints.
 
 ## Install
 
@@ -28,7 +28,7 @@ uvx solar-mcp            # run it; nothing to install
 
 ## Quick Start
 
-No credentials needed — just install and configure your MCP client.
+No credentials needed—just install and configure your MCP client.
 
 ### Configure your MCP client
 
